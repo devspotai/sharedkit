@@ -2,20 +2,37 @@ package models
 
 import "time"
 
-// UserContext represents authenticated user information
-// This is extracted from JWT and used across all services
+// UserContext represents the authenticated user context
 type UserContext struct {
 	UserID        string
 	Email         string
 	EmailVerified bool
 	Name          string
+	GivenName     string
+	FamilyName    string
 	Roles         []string
-	Companies     []CompanyContext
+	Companies     []Company
 	SessionID     string
+	Subject       string // Keycloak user ID
 }
 
-// CompanyContext represents a user's association with a company
-type CompanyContext struct {
+// JWKS represents JSON Web Key Set
+type JWKS struct {
+	Keys []JWK `json:"keys"`
+}
+
+// JWK represents a JSON Web Key
+type JWK struct {
+	Kid string `json:"kid"`
+	Kty string `json:"kty"`
+	Alg string `json:"alg"`
+	Use string `json:"use"`
+	N   string `json:"n"`
+	E   string `json:"e"`
+}
+
+// Company represents a company association in the JWT
+type Company struct {
 	ID     string `json:"id"`
 	Role   string `json:"role"`   // OWNER, MANAGER, STAFF
 	Status string `json:"status"` // VERIFIED, PENDING, SUSPENDED
@@ -30,9 +47,9 @@ type ErrorResponse struct {
 
 // PaginationParams represents pagination parameters
 type PaginationParams struct {
-	Limit   int    `form:"limit" json:"limit"`
-	Offset  int    `form:"offset" json:"offset"`
-	OrderBy string `form:"order_by" json:"order_by"`
+	Limit    int    `form:"limit" json:"limit"`
+	Offset   int    `form:"offset" json:"offset"`
+	OrderBy  string `form:"order_by" json:"order_by"`
 	OrderDir string `form:"order_dir" json:"order_dir"`
 }
 
@@ -70,8 +87,8 @@ const (
 	CompanyStatusSuspended = "SUSPENDED"
 
 	// Pagination
-	DefaultLimit      = 20
-	MaxLimit          = 100
-	DefaultOrderBy    = "created_at"
-	DefaultOrderDir   = "DESC"
+	DefaultLimit    = 20
+	MaxLimit        = 100
+	DefaultOrderBy  = "created_at"
+	DefaultOrderDir = "DESC"
 )

@@ -14,7 +14,7 @@ type Config struct {
 
 	// Database
 	DatabaseURL string
-	
+
 	// Redis
 	RedisURL      string
 	RedisPassword string
@@ -29,11 +29,11 @@ type Config struct {
 	UseInternalAuth      bool
 
 	// Observability
-	GrafanaCloudInstanceID  string
-	GrafanaCloudAPIKey      string
+	GrafanaCloudInstanceID   string
+	GrafanaCloudAPIKey       string
 	GrafanaCloudOTLPEndpoint string
-	ServiceName             string
-	ServiceVersion          string
+	ServiceName              string
+	ServiceVersion           string
 
 	// Feature Flags
 	EnableTracing bool
@@ -47,6 +47,39 @@ type ConnectionPoolConfig struct {
 	ConnMaxLifetimeInHours int
 	ConnMaxIdleTimeInMin   int
 	HealthCheckPeriodInSec int
+}
+
+// RedisConfig holds Redis connection configuration
+type RedisConfig struct {
+	URL          string
+	Password     string
+	DB           int
+	MaxRetries   int
+	PoolSize     int
+	MinIdleConns int
+}
+
+// DefaultRedisConfig returns sensible defaults for Redis configuration
+func DefaultRedisConfig() *RedisConfig {
+	return &RedisConfig{
+		URL:          "localhost:6379",
+		Password:     "",
+		DB:           0,
+		MaxRetries:   3,
+		PoolSize:     10,
+		MinIdleConns: 2,
+	}
+}
+
+func LoadRedisConfig() *RedisConfig {
+	return &RedisConfig{
+		URL:          getEnv("REDIS_URL", "localhost:6379"),
+		Password:     getEnv("REDIS_PASSWORD", ""),
+		DB:           getEnvAsInt("REDIS_DB", 0),
+		MaxRetries:   getEnvAsInt("REDIS_MAX_RETRIES", 3),
+		PoolSize:     getEnvAsInt("REDIS_POOL_SIZE", 10),
+		MinIdleConns: getEnvAsInt("REDIS_MIN_IDLE_CONNS", 2),
+	}
 }
 
 // LoadConfig loads configuration from environment variables

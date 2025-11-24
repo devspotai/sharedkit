@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/devspotai/sharedkit/models"
 )
 
 // InternalServiceAuth middleware ensures only Traefik can call internal services
@@ -118,7 +120,7 @@ type ForwardedUserHeaders struct {
 	Email         string
 	EmailVerified bool
 	Roles         []string
-	Companies     []Company
+	Companies     []models.Company
 }
 
 // ExtractForwardedUserContext extracts user context from headers set by Traefik
@@ -131,7 +133,7 @@ func ExtractForwardedUserContext(c *gin.Context) (*ForwardedUserHeaders, error) 
 
 	email := c.GetHeader("X-User-Email")
 	emailVerified := c.GetHeader("X-User-Email-Verified") == "true"
-	
+
 	// Parse roles from comma-separated string
 	rolesStr := c.GetHeader("X-User-Roles")
 	var roles []string
@@ -141,7 +143,7 @@ func ExtractForwardedUserContext(c *gin.Context) (*ForwardedUserHeaders, error) 
 
 	// Parse companies from JSON header
 	companiesStr := c.GetHeader("X-User-Companies")
-	var companies []Company
+	var companies []models.Company
 	if companiesStr != "" {
 		// In production, parse JSON. For simplicity, we'll leave it empty
 		// json.Unmarshal([]byte(companiesStr), &companies)
@@ -161,7 +163,7 @@ func parseCommaSeparated(s string) []string {
 	if s == "" {
 		return []string{}
 	}
-	
+
 	result := []string{}
 	for _, part := range splitAndTrim(s, ",") {
 		if part != "" {
@@ -201,17 +203,17 @@ func split(s, sep string) []string {
 func trim(s string) string {
 	start := 0
 	end := len(s)
-	
+
 	// Trim leading spaces
 	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
 		start++
 	}
-	
+
 	// Trim trailing spaces
 	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
 		end--
 	}
-	
+
 	return s[start:end]
 }
 
@@ -221,14 +223,14 @@ func CombinedAuth(jwtMiddleware *JWTMiddleware, internalAuth *InternalServiceAut
 	return func(c *gin.Context) {
 		// Check if request has internal auth headers
 		internalAuthHeader := c.GetHeader("X-Internal-Auth")
-		
+
 		if internalAuthHeader != "" {
 			// Internal service call - validate internal auth
 			internalAuth.Middleware()(c)
 			if c.IsAborted() {
 				return
 			}
-			
+
 			// Extract forwarded user context
 			userContext, err := ExtractForwardedUserContext(c)
 			if err != nil {
@@ -236,7 +238,7 @@ func CombinedAuth(jwtMiddleware *JWTMiddleware, internalAuth *InternalServiceAut
 				c.Abort()
 				return
 			}
-			
+
 			// Set user context in Gin context
 			c.Set("user_id", userContext.UserID)
 			c.Set("email", userContext.Email)
@@ -250,7 +252,7 @@ func CombinedAuth(jwtMiddleware *JWTMiddleware, internalAuth *InternalServiceAut
 				return
 			}
 		}
-		
+
 		c.Next()
 	}
 }

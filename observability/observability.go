@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"sys-backend-user/config"
+	"github.com/devspotai/sharedkit/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
