@@ -10,6 +10,13 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+var (
+	ErrKeyNotFound             = fmt.Errorf("key not found")
+	ErrRedisDown               = fmt.Errorf("redis is down")
+	ErrFailedToConnect         = fmt.Errorf("failed to connect to redis")
+	ErrRedisHealthCheckFailure = fmt.Errorf("redis health check failed")
+)
+
 type RedisCache struct {
 	client *redis.Client
 }
@@ -25,7 +32,7 @@ func NewRedisCache(addr, password string, db int) (*RedisCache, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrFailedToConnect, err)
 	}
 
 	return &RedisCache{client: client}, nil
@@ -56,7 +63,7 @@ func (r *RedisCache) Set(ctx context.Context, key string, value interface{}, exp
 func (r *RedisCache) Get(ctx context.Context, key string, dest interface{}) error {
 	data, err := r.client.Get(ctx, key).Result()
 	if err == redis.Nil {
-		return fmt.Errorf("key not found")
+		return ErrKeyNotFound
 	}
 	if err != nil {
 		return err
@@ -80,7 +87,7 @@ func (r *RedisCache) DeletePattern(ctx context.Context, pattern string) error {
 // HealthCheck performs a health check on the Redis connection
 func (r *RedisCache) HealthCheck(ctx context.Context) error {
 	if err := r.client.Ping(ctx).Err(); err != nil {
-		return fmt.Errorf("redis health check failed: %w", err)
+		return fmt.Errorf("%w: %v", ErrRedisHealthCheckFailure, err)
 	}
 	return nil
 }
