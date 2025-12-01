@@ -15,6 +15,7 @@ var (
 	ErrRedisDown               = fmt.Errorf("redis is down")
 	ErrFailedToConnect         = fmt.Errorf("failed to connect to redis")
 	ErrRedisHealthCheckFailure = fmt.Errorf("redis health check failed")
+	ErrUnmarshalCacheValue     = fmt.Errorf("failed to unmarshal cache value")
 )
 
 type RedisCache struct {
@@ -69,7 +70,7 @@ func (r *RedisCache) Get(ctx context.Context, key string, dest interface{}) erro
 		return err
 	}
 
-	return json.Unmarshal([]byte(data), dest)
+	return fmt.Errorf("%w: %v", ErrUnmarshalCacheValue, json.Unmarshal([]byte(data), dest))
 }
 
 func (r *RedisCache) Delete(ctx context.Context, key string) error {
