@@ -51,12 +51,13 @@ type ConnectionPoolConfig struct {
 
 // RedisConfig holds Redis connection configuration
 type RedisConfig struct {
-	URL          string
-	Password     string
-	DB           int
-	MaxRetries   int
-	PoolSize     int
-	MinIdleConns int
+	URL               string
+	Password          string
+	DB                int
+	MaxRetries        int
+	PoolSize          int
+	MinIdleConns      int
+	DefaultTTLSeconds int
 }
 
 // DefaultRedisConfig returns sensible defaults for Redis configuration

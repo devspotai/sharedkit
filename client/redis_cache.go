@@ -20,7 +20,17 @@ var (
 
 type RedisCache struct {
 	client *redis.Client
+	ttl    time.Duration
 }
+
+type SetOp struct {
+	Key   string
+	Value string
+	TTL   time.Duration
+}
+
+type PipelineSetter func(key string, value any, ttl time.Duration)
+type PipelineDeleter func(key string)
 
 func NewRedisCache(addr, password string, db int) (*RedisCache, error) {
 	client := redis.NewClient(&redis.Options{
@@ -36,7 +46,7 @@ func NewRedisCache(addr, password string, db int) (*RedisCache, error) {
 		return nil, fmt.Errorf("%w: %v", ErrFailedToConnect, err)
 	}
 
-	return &RedisCache{client: client}, nil
+	return &RedisCache{client: client, ttl: 5 * time.Minute}, nil
 }
 
 func NewRedisCacheFromConfig(cfg *config.RedisConfig) *RedisCache {
@@ -49,7 +59,7 @@ func NewRedisCacheFromConfig(cfg *config.RedisConfig) *RedisCache {
 		MinIdleConns: cfg.MinIdleConns,
 	})
 
-	return &RedisCache{client: client}
+	return &RedisCache{client: client, ttl: time.Duration(cfg.DefaultTTLSeconds) * time.Second}
 }
 
 func (r *RedisCache) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
@@ -90,5 +100,76 @@ func (r *RedisCache) HealthCheck(ctx context.Context) error {
 	if err := r.client.Ping(ctx).Err(); err != nil {
 		return fmt.Errorf("%w: %v", ErrRedisHealthCheckFailure, err)
 	}
+	return nil
+}
+
+func (c *RedisCache) WithPipeline(ctx context.Context,
+	fn func(set PipelineSetter, del PipelineDeleter) error) error {
+
+	pipe := c.client.TxPipeline()
+
+	setter := func(key string, value any, ttl time.Duration) {
+		pipe.Set(ctx, key, value, ttl)
+	}
+
+	deleter := func(key string) {
+		pipe.Del(ctx, key)
+	}
+
+	// Let the caller queue ops
+	if err := fn(setter, deleter); err != nil {
+		// caller error before Exec
+		return err
+	}
+
+	// Execute all at once
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("cache pipeline Exec failed: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteMany removes multiple keys using a TxPipeline.
+// The caller never sees redis.Pipeliner.
+func (c *RedisCache) DeleteMany(ctx context.Context, keys ...string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+
+	pipe := c.client.TxPipeline()
+
+	for _, k := range keys {
+		pipe.Del(ctx, k)
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("cache pipeline DEL failed: %w", err)
+	}
+
+	return nil
+}
+
+// SetMany sets multiple keys in a single Redis TxPipeline.
+// The caller never sees redis.Pipeliner.
+func (c *RedisCache) SetMany(ctx context.Context, ops []SetOp) error {
+	if len(ops) == 0 {
+		return nil
+	}
+
+	pipe := c.client.TxPipeline()
+
+	for _, op := range ops {
+		ttl := op.TTL
+		if ttl == 0 {
+			ttl = c.ttl
+		}
+		pipe.Set(ctx, op.Key, op.Value, ttl)
+	}
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("cache pipeline Exec failed: %w", err)
+	}
+
 	return nil
 }
