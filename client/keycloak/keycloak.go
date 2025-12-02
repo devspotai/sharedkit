@@ -1,4 +1,4 @@
-package client
+package keycloak
 
 import (
 	"context"
@@ -83,8 +83,8 @@ func (c *KeycloakClient) InvalidateUserSessions(keycloakUserID, adminToken strin
 	return nil
 }
 
-// fetchPublicKey fetches the public key from Keycloak
-func (c *KeycloakClient) fetchPublicKey() (*rsa.PublicKey, error) {
+// FetchPublicKey fetches the public key from Keycloak
+func (c *KeycloakClient) FetchPublicKey() (*rsa.PublicKey, error) {
 	url := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/certs", c.baseURL, c.realm)
 
 	resp, err := http.Get(url)

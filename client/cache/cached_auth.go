@@ -1,25 +1,27 @@
-package client
+package cache
 
 import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/devspotai/sharedkit/client/keycloak"
 )
 
-type CachedClient struct {
-	KeycloakClient *KeycloakClient
+type CachedAuthClient struct {
+	KeycloakClient *keycloak.KeycloakClient
 	cache          *RedisCache
 }
 
-func NewCachedClient(keycloakClient *KeycloakClient, cache *RedisCache) *CachedClient {
-	return &CachedClient{
+func NewCachedAuthClient(keycloakClient *keycloak.KeycloakClient, cache *RedisCache) *CachedAuthClient {
+	return &CachedAuthClient{
 		KeycloakClient: keycloakClient,
 		cache:          cache,
 	}
 }
 
 // GetPublicKey with caching
-func (c *CachedClient) GetPublicKey(kid string) (interface{}, error) {
+func (c *CachedAuthClient) GetPublicKey(kid string) (interface{}, error) {
 	ctx := context.Background()
 	cacheKey := fmt.Sprintf("keycloak:public_key:%s", kid)
 
@@ -30,7 +32,7 @@ func (c *CachedClient) GetPublicKey(kid string) (interface{}, error) {
 	}
 
 	// Cache miss - fetch from Keycloak
-	publicKey, err := c.KeycloakClient.fetchPublicKey()
+	publicKey, err := c.KeycloakClient.FetchPublicKey()
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +44,7 @@ func (c *CachedClient) GetPublicKey(kid string) (interface{}, error) {
 }
 
 // GetAdminToken with caching
-func (c *CachedClient) GetAdminToken() (string, error) {
+func (c *CachedAuthClient) GetAdminToken() (string, error) {
 	ctx := context.Background()
 	cacheKey := "keycloak:admin_token"
 
@@ -65,7 +67,7 @@ func (c *CachedClient) GetAdminToken() (string, error) {
 }
 
 // UpdateUserAttributes with cache invalidation
-func (c *CachedClient) UpdateUserAttributes(keycloakUserID string, attributes map[string][]string, adminToken string) error {
+func (c *CachedAuthClient) UpdateUserAttributes(keycloakUserID string, attributes map[string][]string, adminToken string) error {
 	ctx := context.Background()
 
 	// Update in Keycloak

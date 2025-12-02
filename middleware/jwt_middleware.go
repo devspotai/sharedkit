@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/devspotai/sharedkit/client"
+	"github.com/devspotai/sharedkit/client/cache"
 	"github.com/devspotai/sharedkit/models"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -19,7 +19,7 @@ import (
 
 // JWTMiddleware handles JWT token validation and parsing
 type JWTMiddleware struct {
-	cachedClient  *client.CachedClient
+	cachedClient  *cache.CachedAuthClient
 	realm         string
 	tracer        trace.Tracer
 	keyRefreshTTL time.Duration
@@ -28,7 +28,7 @@ type JWTMiddleware struct {
 }
 
 // NewJWTMiddleware creates a new JWT middleware
-func NewJWTMiddleware(cachedClient *client.CachedClient, realm string) *JWTMiddleware {
+func NewJWTMiddleware(cachedClient *cache.CachedAuthClient, realm string) *JWTMiddleware {
 	middleware := &JWTMiddleware{
 		cachedClient:  cachedClient,
 		realm:         realm,
