@@ -173,3 +173,7 @@ func (c *RedisCache) SetMany(ctx context.Context, ops []SetOp) error {
 
 	return nil
 }
+
+func (c *RedisCache) Close() error {
+	return c.client.Close()
+}
