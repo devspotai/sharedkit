@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"net/http"
+	"time"
+)
 
 // UserContext represents the authenticated user context
 type UserContext struct {
@@ -40,9 +43,37 @@ type Company struct {
 
 // ErrorResponse is a standard error response format
 type ErrorResponse struct {
-	Error   string `json:"error"`
-	Message string `json:"message,omitempty"`
-	Code    string `json:"code,omitempty"`
+	Message    string `json:"message,omitempty"`
+	Details    string `json:"details,omitempty"` // Optional field for additional error details
+	Code       string `json:"code,omitempty"`
+	StatusCode int    `json:"status_code,omitempty"`
+}
+
+func GetErrorResponse(message string, statusCode int, details string) ErrorResponse {
+	errorResponse := ErrorResponse{
+		Message:    message,
+		Details:    details,
+		StatusCode: statusCode,
+	}
+
+	switch statusCode {
+	case http.StatusBadRequest:
+		errorResponse.Code = "BAD_REQUEST"
+	case http.StatusUnauthorized:
+		errorResponse.Code = "UNAUTHORIZED"
+	case http.StatusForbidden:
+		errorResponse.Code = "FORBIDDEN"
+	case http.StatusNotFound:
+		errorResponse.Code = "NOT_FOUND"
+	case http.StatusInternalServerError:
+		errorResponse.Code = "INTERNAL_SERVER_ERROR"
+	case http.StatusConflict:
+		errorResponse.Code = "CONFLICT"
+	default:
+		errorResponse.Code = "UNKNOWN_ERROR"
+	}
+
+	return errorResponse
 }
 
 // PaginationParams represents pagination parameters
