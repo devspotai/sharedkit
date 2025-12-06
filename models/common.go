@@ -3,7 +3,7 @@ package models
 import (
 	"net/http"
 	"time"
-)
+)=
 
 // UserContext represents the authenticated user context
 type UserContext struct {
