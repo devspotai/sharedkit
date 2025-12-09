@@ -19,6 +19,57 @@ type UserContext struct {
 	Subject       string // Keycloak user ID
 }
 
+func (u *UserContext) HasMemberRole(role string) bool {
+	for _, r := range u.Roles {
+		if r == role {
+			return true
+		}
+	}
+	return false
+}
+
+func (u *UserContext) HasAnyOfMemberRoles(companyID string, roles []string) bool {
+	for _, c := range u.Roles {
+		for _, role := range roles {
+			if c == role {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (u *UserContext) HasCompanyRole(companyID, role string) bool {
+	for _, c := range u.Companies {
+		if c.ID == companyID && c.Role == role {
+			return true
+		}
+	}
+	return false
+}
+
+func (u *UserContext) IsCompanyVerified(companyID string) bool {
+	for _, c := range u.Companies {
+		if c.ID == companyID && c.Status == CompanyStatusVerified {
+			return true
+		}
+	}
+	return false
+}
+
+func (u *UserContext) HasAnyOfVerifiedCompanyRoles(companyID string, roles []string) bool {
+	for _, c := range u.Companies {
+		if c.ID == companyID && c.Status == CompanyStatusVerified {
+			for _, role := range roles {
+				if c.Role == role {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // JWKS represents JSON Web Key Set
 type JWKS struct {
 	Keys []JWK `json:"keys"`
