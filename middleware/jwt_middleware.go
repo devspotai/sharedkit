@@ -100,6 +100,7 @@ func (m *JWTMiddleware) Middleware() gin.HandlerFunc {
 		// Add user context to Gin context
 		c.Set("user", userCtx)
 		c.Set("user_id", userCtx.UserID)
+		c.Set("host_id", userCtx.HostID)
 		c.Set("email", userCtx.Email)
 		c.Set("roles", userCtx.Roles)
 		c.Set("companies", userCtx.Companies)

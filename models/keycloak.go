@@ -22,6 +22,7 @@ type KeycloakClaims struct {
 	FamilyName    string    `json:"family_name"`
 	Email         string    `json:"email"`
 	UserID        string    `json:"user_id"`   // Custom claim
+	HostID        string    `json:"host_id"`   // Custom claim
 	Companies     []Company `json:"companies"` // Custom claim
 	SessionState  string    `json:"session_state"`
 	ACR           string    `json:"acr"`

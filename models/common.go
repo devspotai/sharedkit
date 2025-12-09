@@ -8,6 +8,7 @@ import (
 // UserContext represents the authenticated user context
 type UserContext struct {
 	UserID        string
+	HostID        string
 	Email         string
 	EmailVerified bool
 	Name          string
@@ -87,9 +88,10 @@ type JWK struct {
 
 // Company represents a company association in the JWT
 type Company struct {
-	ID     string `json:"id"`
-	Role   string `json:"role"`   // OWNER, MANAGER, STAFF
-	Status string `json:"status"` // VERIFIED, PENDING, SUSPENDED
+	ID            string `json:"id"`
+	Role          string `json:"role"` // OWNER, MANAGER, STAFF
+	CoverImageURL string `json:"cover_image_url,omitempty"`
+	Status        string `json:"status"` // VERIFIED, PENDING, SUSPENDED
 }
 
 // ErrorResponse is a standard error response format

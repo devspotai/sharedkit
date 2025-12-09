@@ -260,6 +260,7 @@ func (c *KeycloakClient) ParseToken(ctx context.Context, tokenString string) (*m
 	// Build user context
 	userCtx := &models.UserContext{
 		UserID:        claims.UserID,
+		HostID:        claims.HostID,
 		Email:         claims.Email,
 		EmailVerified: claims.EmailVerified,
 		Name:          claims.Name,
