@@ -161,9 +161,13 @@ const (
 	RoleProductCreator = "PRODUCT_CREATOR"
 
 	// Company Roles
-	CompanyRoleOwner   = "OWNER"
-	CompanyRoleManager = "MANAGER"
-	CompanyRoleStaff   = "STAFF"
+	CompanyRoleOwner                   = "OWNER"
+	CompanyRoleManager                 = "MANAGER"
+	CompanyRoleAdminAllStays           = "ADMIN_ALL_STAYS"
+	CompanyRoleAdminAllExperiences     = "ADMIN_ALL_EXPERIENCES"
+	CompanyRoleAdminSpecificStay       = "ADMIN_SPECIFIC_STAYS"
+	CompanyRoleAdminSpecificExperience = "ADMIN_SPECIFIC_EXPERIENCES"
+	CompanyRoleStaff                   = "STAFF"
 
 	// Company Status
 	CompanyStatusVerified  = "VERIFIED"
