@@ -218,6 +218,7 @@ func (m *InternalServiceAuth) validateRequest(c *gin.Context) error {
 	// Store user context
 	userCtx := &models.UserContext{
 		UserID:        userID,
+		HostID:        hostID,
 		Email:         email,
 		EmailVerified: emailVerified,
 		Roles:         roles,
