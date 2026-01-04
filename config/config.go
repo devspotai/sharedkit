@@ -74,35 +74,35 @@ func DefaultRedisConfig() *RedisConfig {
 
 func LoadRedisConfig() *RedisConfig {
 	return &RedisConfig{
-		URL:          getEnv("REDIS_URL", "localhost:6379"),
-		Password:     getEnv("REDIS_PASSWORD", ""),
-		DB:           getEnvAsInt("REDIS_DB", 0),
-		MaxRetries:   getEnvAsInt("REDIS_MAX_RETRIES", 3),
-		PoolSize:     getEnvAsInt("REDIS_POOL_SIZE", 10),
-		MinIdleConns: getEnvAsInt("REDIS_MIN_IDLE_CONNS", 2),
+		URL:          GetEnv("REDIS_URL", "localhost:6379"),
+		Password:     GetEnv("REDIS_PASSWORD", ""),
+		DB:           GetEnvAsInt("REDIS_DB", 0),
+		MaxRetries:   GetEnvAsInt("REDIS_MAX_RETRIES", 3),
+		PoolSize:     GetEnvAsInt("REDIS_POOL_SIZE", 10),
+		MinIdleConns: GetEnvAsInt("REDIS_MIN_IDLE_CONNS", 2),
 	}
 }
 
 // LoadConfig loads configuration from environment variables
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
-		Port:                     getEnvAsInt("PORT", 8080),
-		Environment:              getEnv("ENVIRONMENT", "development"),
-		DatabaseURL:              getEnv("DATABASE_URL", ""),
-		RedisURL:                 getEnv("REDIS_URL", "localhost:6379"),
-		RedisPassword:            getEnv("REDIS_PASSWORD", ""),
-		RedisDB:                  getEnvAsInt("REDIS_DB", 0),
-		KeycloakURL:              getEnv("KEYCLOAK_URL", "http://localhost:8080"),
-		KeycloakRealm:            getEnv("KEYCLOAK_REALM", "travel-saas"),
-		InternalSharedSecret:     getEnv("INTERNAL_SHARED_SECRET", ""),
-		UseInternalAuth:          getEnvAsBool("USE_INTERNAL_AUTH", false),
-		GrafanaCloudInstanceID:   getEnv("GRAFANA_CLOUD_INSTANCE_ID", ""),
-		GrafanaCloudAPIKey:       getEnv("GRAFANA_CLOUD_API_KEY", ""),
-		GrafanaCloudOTLPEndpoint: getEnv("GRAFANA_CLOUD_OTLP_ENDPOINT", ""),
-		ServiceName:              getEnv("SERVICE_NAME", "sys-backend-user"),
-		ServiceVersion:           getEnv("SERVICE_VERSION", "1.0.0"),
-		EnableTracing:            getEnvAsBool("ENABLE_TRACING", true),
-		EnableMetrics:            getEnvAsBool("ENABLE_METRICS", true),
+		Port:                     GetEnvAsInt("PORT", 8080),
+		Environment:              GetEnv("ENVIRONMENT", "development"),
+		DatabaseURL:              GetEnv("DATABASE_URL", ""),
+		RedisURL:                 GetEnv("REDIS_URL", "localhost:6379"),
+		RedisPassword:            GetEnv("REDIS_PASSWORD", ""),
+		RedisDB:                  GetEnvAsInt("REDIS_DB", 0),
+		KeycloakURL:              GetEnv("KEYCLOAK_URL", "http://localhost:8080"),
+		KeycloakRealm:            GetEnv("KEYCLOAK_REALM", "travel-saas"),
+		InternalSharedSecret:     GetEnv("INTERNAL_SHARED_SECRET", ""),
+		UseInternalAuth:          GetEnvAsBool("USE_INTERNAL_AUTH", false),
+		GrafanaCloudInstanceID:   GetEnv("GRAFANA_CLOUD_INSTANCE_ID", ""),
+		GrafanaCloudAPIKey:       GetEnv("GRAFANA_CLOUD_API_KEY", ""),
+		GrafanaCloudOTLPEndpoint: GetEnv("GRAFANA_CLOUD_OTLP_ENDPOINT", ""),
+		ServiceName:              GetEnv("SERVICE_NAME", "sys-backend-user"),
+		ServiceVersion:           GetEnv("SERVICE_VERSION", "1.0.0"),
+		EnableTracing:            GetEnvAsBool("ENABLE_TRACING", true),
+		EnableMetrics:            GetEnvAsBool("ENABLE_METRICS", true),
 	}
 
 	// Validate required configuration
@@ -119,7 +119,7 @@ func LoadConfig() (*Config, error) {
 
 // Helper functions
 
-func getEnv(key, defaultValue string) string {
+func GetEnv(key, defaultValue string) string {
 	value := os.Getenv(key)
 	if value == "" {
 		return defaultValue
@@ -127,7 +127,7 @@ func getEnv(key, defaultValue string) string {
 	return value
 }
 
-func getEnvAsInt(key string, defaultValue int) int {
+func GetEnvAsInt(key string, defaultValue int) int {
 	valueStr := os.Getenv(key)
 	if valueStr == "" {
 		return defaultValue
@@ -139,7 +139,7 @@ func getEnvAsInt(key string, defaultValue int) int {
 	return value
 }
 
-func getEnvAsBool(key string, defaultValue bool) bool {
+func GetEnvAsBool(key string, defaultValue bool) bool {
 	valueStr := os.Getenv(key)
 	if valueStr == "" {
 		return defaultValue

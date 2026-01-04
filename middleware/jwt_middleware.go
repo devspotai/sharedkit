@@ -3,15 +3,12 @@ package middleware
 import (
 	"fmt"
 
-	"crypto/rsa"
 	"net/http"
 	"strings"
-	"time"
 
-	"github.com/gin-gonic/gin"
-
-	"github.com/devspotai/sharedkit/client/cache"
+	"github.com/devspotai/sharedkit/client/auth"
 	"github.com/devspotai/sharedkit/models"
+	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -19,33 +16,15 @@ import (
 
 // JWTMiddleware handles JWT token validation and parsing
 type JWTMiddleware struct {
-	cachedClient  *cache.CachedAuthClient
-	realm         string
-	tracer        trace.Tracer
-	keyRefreshTTL time.Duration
-	publicKey     *rsa.PublicKey
-	lastKeyFetch  time.Time
+	authClient *auth.CachedAuthClient
+	tracer     trace.Tracer
 }
 
 // NewJWTMiddleware creates a new JWT middleware
-func NewJWTMiddleware(cachedClient *cache.CachedAuthClient, realm string) *JWTMiddleware {
+func NewJWTMiddleware(authClient *auth.CachedAuthClient) *JWTMiddleware {
 	middleware := &JWTMiddleware{
-		cachedClient:  cachedClient,
-		realm:         realm,
-		tracer:        otel.Tracer("jwt-middleware"),
-		keyRefreshTTL: 1 * time.Hour,
-	}
-
-	// Fetch public key on initialization
-	publicKey, err := cachedClient.GetPublicKey("test-kid")
-	if err == nil {
-		middleware.publicKey = publicKey.(*rsa.PublicKey)
-		middleware.lastKeyFetch = time.Now()
-	}
-
-	if err != nil {
-		// Log error but don't fail - will retry on first request
-		fmt.Printf("Warning: Failed to fetch public key on init: %v\n", err)
+		authClient: authClient,
+		tracer:     otel.Tracer("jwt-middleware"),
 	}
 
 	return middleware
@@ -61,38 +40,34 @@ func (m *JWTMiddleware) Middleware() gin.HandlerFunc {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			span.RecordError(fmt.Errorf("missing authorization header"))
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
-			c.Abort()
+			//No auth header - allow request to proceed without user context
+			//Protected endpoints will check for user context
+			c.Next()
 			return
 		}
 
-		// Bearer token format
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
+		if !strings.HasPrefix(authHeader, "Bearer ") {
 			span.RecordError(fmt.Errorf("invalid authorization header format"))
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization header format"})
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid authorization header format - must be 'Bearer <token>'",
+			})
 			c.Abort()
 			return
 		}
 
-		tokenString := parts[1]
-
-		// Refresh public key if needed
-		if time.Since(m.lastKeyFetch) > m.keyRefreshTTL {
-			publicKey, err := m.cachedClient.GetPublicKey("test-kid")
-			if err == nil {
-				m.publicKey = publicKey.(*rsa.PublicKey)
-				m.lastKeyFetch = time.Now()
-			} else {
-				fmt.Printf("Warning: Failed to refresh public key: %v\n", err)
-			}
-		}
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
 		// Parse and validate token
-		userCtx, err := m.cachedClient.KeycloakClient.ParseToken(ctx, tokenString)
+		userCtx, tokenValid, err := m.authClient.ParseToken(ctx, tokenString)
 		if err != nil {
 			span.RecordError(err)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": err.Error()})
+			c.Abort()
+			return
+		}
+		if !tokenValid {
+			span.RecordError(fmt.Errorf("invalid token"))
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			c.Abort()
 			return
 		}
@@ -117,26 +92,11 @@ func (m *JWTMiddleware) Middleware() gin.HandlerFunc {
 	}
 }
 
-// GetUserContext extracts user context from Gin context
-func GetUserContext(c *gin.Context) (*models.UserContext, error) {
-	user, exists := c.Get("user")
-	if !exists {
-		return nil, fmt.Errorf("user context not found")
-	}
-
-	userCtx, ok := user.(*models.UserContext)
-	if !ok {
-		return nil, fmt.Errorf("invalid user context type")
-	}
-
-	return userCtx, nil
-}
-
 // RequireRole middleware ensures user has at least one of the required roles
 func RequireRole(roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userCtx, err := GetUserContext(c)
-		if err != nil {
+		userCtx, ok := models.GetUserContext(c)
+		if !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			c.Abort()
 			return
@@ -168,8 +128,8 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 // RequireEmailVerified ensures the user's email is verified
 func RequireEmailVerified() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userCtx, err := GetUserContext(c)
-		if err != nil {
+		userCtx, ok := models.GetUserContext(c)
+		if !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			c.Abort()
 			return
@@ -186,20 +146,4 @@ func RequireEmailVerified() gin.HandlerFunc {
 
 		c.Next()
 	}
-}
-
-// HasCompanyAccess checks if user has access to a specific company
-func HasCompanyAccess(companyID string, requiredRoles ...string) bool {
-	// This will be used in service layer, not as middleware
-	return true // Implementation depends on business logic
-}
-
-// GetUserCompanyRole returns the user's role for a specific company
-func GetUserCompanyRole(userCtx *models.UserContext, companyID string) (string, bool) {
-	for _, company := range userCtx.Companies {
-		if company.ID == companyID && company.Status == "VERIFIED" {
-			return company.Role, true
-		}
-	}
-	return "", false
 }

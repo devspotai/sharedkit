@@ -71,6 +71,10 @@ func (r *RedisCache) Set(ctx context.Context, key string, value interface{}, exp
 	return r.client.Set(ctx, key, data, expiration).Err()
 }
 
+func (r *RedisCache) SetNX(ctx context.Context, key string, value []byte, expiration time.Duration) (bool, error) {
+	return r.client.SetNX(ctx, key, value, expiration).Result()
+}
+
 func (r *RedisCache) Get(ctx context.Context, key string, dest interface{}) error {
 	data, err := r.client.Get(ctx, key).Result()
 	if err == redis.Nil {
@@ -81,6 +85,17 @@ func (r *RedisCache) Get(ctx context.Context, key string, dest interface{}) erro
 	}
 
 	return fmt.Errorf("%w: %v", ErrUnmarshalCacheValue, json.Unmarshal([]byte(data), dest))
+}
+
+func (r *RedisCache) GetRaw(ctx context.Context, key string) ([]byte, error) {
+	data, err := r.client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return nil, ErrKeyNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []byte(data), nil
 }
 
 func (r *RedisCache) Delete(ctx context.Context, key string) error {
