@@ -36,10 +36,10 @@ func (c *CachedAuthClient) getCacheKeyPattern() string {
 }
 
 func (c *CachedAuthClient) FetchAndCachePublicKeys(keycloakUserID, suffix string) error {
-	ctx := context.Background()
-
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	// Cache miss - fetch from Keycloak
-	publicKeys, err := c.KeycloakClient.refreshKeysFromKeycloak()
+	publicKeys, err := c.KeycloakClient.refreshKeysFromKeycloak(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch public keys from IDP: %w", err)
 	}

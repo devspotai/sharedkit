@@ -343,9 +343,7 @@ func (c *KeycloakClient) GetPublicKeysToCache() (map[string]json.RawMessage, err
 }
 
 // refreshKeysFromKeycloak fetches keys from Keycloak and caches them
-func (c *KeycloakClient) refreshKeysFromKeycloak() (map[string]json.RawMessage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+func (c *KeycloakClient) refreshKeysFromKeycloak(ctx context.Context) (map[string]json.RawMessage, error) {
 
 	// Fetch JWKS from Keycloak
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.jwksURL, nil)
