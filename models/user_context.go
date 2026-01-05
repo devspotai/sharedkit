@@ -23,7 +23,7 @@ type UserContext struct {
 	Subject       string // Keycloak user ID
 }
 
-func (u *UserContext) HasMemberRole(role string) bool {
+func (u *UserContext) HasRole(role string) bool {
 	for _, r := range u.Roles {
 		if r == role {
 			return true
@@ -32,9 +32,9 @@ func (u *UserContext) HasMemberRole(role string) bool {
 	return false
 }
 
-func (u *UserContext) HasAnyOfMemberRoles(companyID string, roles ...string) bool {
+func (u *UserContext) HasAnyOfRoles(companyID string, roles ...string) bool {
 	for _, required := range roles {
-		if u.HasMemberRole(required) {
+		if u.HasRole(required) {
 			return true
 		}
 	}
@@ -63,7 +63,7 @@ func (u *UserContext) HasCompanyAccess(companyID string) bool {
 
 func (u *UserContext) HasCompanyRole(companyID, role string) bool {
 	for _, c := range u.Companies {
-		if c.ID == companyID && c.Role == role {
+		if c.ID == companyID && c.Role == role && c.Status == CompanyStatusVerified {
 			return true
 		}
 	}
@@ -112,16 +112,6 @@ func MustGetUserContext(c *gin.Context) *UserContext {
 	return userCtx
 }
 
-// HasRole checks if user has a specific role
-func (u *UserContext) HasRole(role string) bool {
-	for _, r := range u.Roles {
-		if r == role {
-			return true
-		}
-	}
-	return false
-}
-
 // GetUserCompanies returns all verified companies for the user
 func (u *UserContext) GetUserCompanies() []Company {
 	companies := make([]Company, 0)
@@ -131,4 +121,14 @@ func (u *UserContext) GetUserCompanies() []Company {
 		}
 	}
 	return companies
+}
+
+// GetCompanyRole returns user's role for a specific company
+func (u *UserContext) GetCompanyRole(companyID string) (string, bool) {
+	for _, company := range u.Companies {
+		if company.ID == companyID && company.Status == "VERIFIED" {
+			return company.Role, true
+		}
+	}
+	return "", false
 }

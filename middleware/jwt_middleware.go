@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/devspotai/sharedkit/client/auth"
-	"github.com/devspotai/sharedkit/models"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -87,62 +86,6 @@ func (m *JWTMiddleware) Middleware() gin.HandlerFunc {
 			attribute.Bool("user.email_verified", userCtx.EmailVerified),
 			attribute.StringSlice("user.roles", userCtx.Roles),
 		)
-
-		c.Next()
-	}
-}
-
-// RequireRole middleware ensures user has at least one of the required roles
-func RequireRole(roles ...string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		userCtx, ok := models.GetUserContext(c)
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-			c.Abort()
-			return
-		}
-
-		hasRole := false
-		for _, requiredRole := range roles {
-			for _, userRole := range userCtx.Roles {
-				if userRole == requiredRole {
-					hasRole = true
-					break
-				}
-			}
-			if hasRole {
-				break
-			}
-		}
-
-		if !hasRole {
-			c.JSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
-			c.Abort()
-			return
-		}
-
-		c.Next()
-	}
-}
-
-// RequireEmailVerified ensures the user's email is verified
-func RequireEmailVerified() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		userCtx, ok := models.GetUserContext(c)
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-			c.Abort()
-			return
-		}
-
-		if !userCtx.EmailVerified {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error":   "email not verified",
-				"message": "Please verify your email address to access this resource",
-			})
-			c.Abort()
-			return
-		}
 
 		c.Next()
 	}

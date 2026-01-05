@@ -468,21 +468,6 @@ func CombinedAuth(jwtMiddleware *JWTMiddleware, internalAuth *InternalServiceAut
 	}
 }
 
-// RequireAuth ensures user context exists (user is authenticated)
-func RequireAuth() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		userCtx, exists := models.GetUserContext(c)
-		if !exists || userCtx == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "authentication required",
-			})
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
-}
-
 // GenerateNonce generates a cryptographically secure random nonce
 func GenerateNonce() (string, error) {
 	nonce := make([]byte, 32)
