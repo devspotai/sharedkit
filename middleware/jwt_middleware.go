@@ -77,7 +77,7 @@ func (m *JWTMiddleware) Middleware() gin.HandlerFunc {
 		c.Set("host_id", userCtx.HostID)
 		c.Set("email", userCtx.Email)
 		c.Set("roles", userCtx.Roles)
-		c.Set("companies", userCtx.Companies)
+		c.Set("companies", userCtx.CompaniesRoles)
 
 		// Add user info to trace
 		span.SetAttributes(

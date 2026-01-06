@@ -187,14 +187,14 @@ func (c *CachedAuthClient) ParseToken(ctx context.Context, tokenString string) (
 
 	// Build user context
 	userCtx := &models.UserContext{
-		UserID:        claims.UserID,
-		HostID:        claims.HostID,
-		Email:         claims.Email,
-		EmailVerified: claims.EmailVerified,
-		Roles:         claims.RealmAccess.Roles,
-		Companies:     claims.Companies,
-		SessionID:     claims.SessionID,
-		Subject:       claims.Subject,
+		UserID:         claims.UserID,
+		HostID:         claims.HostID,
+		Email:          claims.Email,
+		EmailVerified:  claims.EmailVerified,
+		Roles:          claims.RealmAccess.Roles,
+		CompaniesRoles: claims.Companies,
+		SessionID:      claims.SessionID,
+		Subject:        claims.Subject,
 	}
 
 	return userCtx, token.Valid, nil

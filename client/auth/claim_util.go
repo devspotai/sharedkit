@@ -51,12 +51,12 @@ func extractRoles(claims jwt.MapClaims) []string {
 	return []string{}
 }
 
-func extractCompanies(claims jwt.MapClaims) []models.Company {
+func extractCompanies(claims jwt.MapClaims) []models.CompanyRole {
 	if companiesInterface, ok := claims["companies"].([]interface{}); ok {
-		companies := make([]models.Company, 0, len(companiesInterface))
+		companies := make([]models.CompanyRole, 0, len(companiesInterface))
 		for _, c := range companiesInterface {
 			if companyMap, ok := c.(map[string]interface{}); ok {
-				company := models.Company{
+				company := models.CompanyRole{
 					ID:     getStringFromMap(companyMap, "id"),
 					Role:   getStringFromMap(companyMap, "role"),
 					Status: getStringFromMap(companyMap, "status"),
@@ -69,7 +69,7 @@ func extractCompanies(claims jwt.MapClaims) []models.Company {
 		return companies
 	}
 
-	return []models.Company{}
+	return []models.CompanyRole{}
 }
 
 func getStringFromMap(m map[string]interface{}, key string) string {

@@ -25,8 +25,8 @@ type JWK struct {
 	E   string `json:"e"`
 }
 
-// Company represents a company association in the JWT
-type Company struct {
+// CompanyRole represents a company association in the JWT
+type CompanyRole struct {
 	ID            string `json:"id"`
 	Role          string `json:"role"` // OWNER, MANAGER, STAFF
 	CoverImageURL string `json:"cover_image_url,omitempty"`

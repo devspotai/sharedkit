@@ -13,14 +13,14 @@ const UserContextKey = "user_context"
 
 // UserContext represents the authenticated user context
 type UserContext struct {
-	UserID        string
-	HostID        string
-	Email         string
-	EmailVerified bool
-	Roles         []string
-	Companies     []Company
-	SessionID     string
-	Subject       string // Keycloak user ID
+	UserID         string
+	HostID         string
+	Email          string
+	EmailVerified  bool
+	Roles          []string
+	CompaniesRoles []CompanyRole
+	SessionID      string
+	Subject        string // Keycloak user ID
 }
 
 func (u *UserContext) HasRole(role string) bool {
@@ -43,7 +43,7 @@ func (u *UserContext) HasAnyOfRoles(companyID string, roles ...string) bool {
 
 // GetUserCompanyRole returns user's role for a specific company
 func (u *UserContext) GetUserCompanyRole(companyID string) (string, bool) {
-	for _, company := range u.Companies {
+	for _, company := range u.CompaniesRoles {
 		if company.ID == companyID && company.Status == CompanyStatusVerified {
 			return company.Role, true
 		}
@@ -53,7 +53,7 @@ func (u *UserContext) GetUserCompanyRole(companyID string) (string, bool) {
 
 // HasCompanyAccess checks if user has access to a company with any role
 func (u *UserContext) HasCompanyAccess(companyID string) bool {
-	for _, company := range u.Companies {
+	for _, company := range u.CompaniesRoles {
 		if company.ID == companyID && company.Status == CompanyStatusVerified {
 			return true
 		}
@@ -62,7 +62,7 @@ func (u *UserContext) HasCompanyAccess(companyID string) bool {
 }
 
 func (u *UserContext) HasCompanyRole(companyID, role string) bool {
-	for _, c := range u.Companies {
+	for _, c := range u.CompaniesRoles {
 		if c.ID == companyID && c.Role == role && c.Status == CompanyStatusVerified {
 			return true
 		}
@@ -71,7 +71,7 @@ func (u *UserContext) HasCompanyRole(companyID, role string) bool {
 }
 
 func (u *UserContext) IsCompanyVerified(companyID string) bool {
-	for _, c := range u.Companies {
+	for _, c := range u.CompaniesRoles {
 		if c.ID == companyID && c.Status == CompanyStatusVerified {
 			return true
 		}
@@ -80,7 +80,7 @@ func (u *UserContext) IsCompanyVerified(companyID string) bool {
 }
 
 func (u *UserContext) HasAnyOfVerifiedCompanyRoles(companyID string, roles []string) bool {
-	for _, c := range u.Companies {
+	for _, c := range u.CompaniesRoles {
 		if c.ID == companyID && c.Status == CompanyStatusVerified {
 			for _, role := range roles {
 				if c.Role == role {
@@ -113,9 +113,9 @@ func MustGetUserContext(c *gin.Context) *UserContext {
 }
 
 // GetUserCompanies returns all verified companies for the user
-func (u *UserContext) GetUserCompanies() []Company {
-	companies := make([]Company, 0)
-	for _, company := range u.Companies {
+func (u *UserContext) GetUserCompanies() []CompanyRole {
+	companies := make([]CompanyRole, 0)
+	for _, company := range u.CompaniesRoles {
 		if company.Status == CompanyStatusVerified {
 			companies = append(companies, company)
 		}
@@ -125,7 +125,7 @@ func (u *UserContext) GetUserCompanies() []Company {
 
 // GetCompanyRole returns user's role for a specific company
 func (u *UserContext) GetCompanyRole(companyID string) (string, bool) {
-	for _, company := range u.Companies {
+	for _, company := range u.CompaniesRoles {
 		if company.ID == companyID && company.Status == "VERIFIED" {
 			return company.Role, true
 		}

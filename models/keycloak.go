@@ -13,19 +13,19 @@ type KeycloakClaims struct {
 	ResourceAccess map[string]struct {
 		Roles []string `json:"roles"`
 	} `json:"resource_access"`
-	Scope         string    `json:"scope"`
-	SessionID     string    `json:"sid"`
-	EmailVerified bool      `json:"email_verified"`
-	Name          string    `json:"name"`
-	PreferredUser string    `json:"preferred_username"`
-	GivenName     string    `json:"given_name"`
-	FamilyName    string    `json:"family_name"`
-	Email         string    `json:"email"`
-	UserID        string    `json:"user_id"`   // Custom claim
-	HostID        string    `json:"host_id"`   // Custom claim
-	Companies     []Company `json:"companies"` // Custom claim
-	SessionState  string    `json:"session_state"`
-	ACR           string    `json:"acr"`
-	AZP           string    `json:"azp"`
-	Type          string    `json:"typ"`
+	Scope         string        `json:"scope"`
+	SessionID     string        `json:"sid"`
+	EmailVerified bool          `json:"email_verified"`
+	Name          string        `json:"name"`
+	PreferredUser string        `json:"preferred_username"`
+	GivenName     string        `json:"given_name"`
+	FamilyName    string        `json:"family_name"`
+	Email         string        `json:"email"`
+	UserID        string        `json:"user_id"`   // Custom claim
+	HostID        string        `json:"host_id"`   // Custom claim
+	Companies     []CompanyRole `json:"companies"` // Custom claim
+	SessionState  string        `json:"session_state"`
+	ACR           string        `json:"acr"`
+	AZP           string        `json:"azp"`
+	Type          string        `json:"typ"`
 }
