@@ -31,6 +31,7 @@ type CompanyRole struct {
 	Role          string `json:"role"` // OWNER, MANAGER, STAFF
 	CoverImageURL string `json:"cover_image_url,omitempty"`
 	Status        string `json:"status"` // VERIFIED, PENDING, SUSPENDED
+	roles         map[string]interface{}
 }
 
 // ErrorResponse is a standard error response format
