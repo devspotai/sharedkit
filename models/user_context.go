@@ -18,7 +18,7 @@ type UserContext struct {
 	Email          string
 	EmailVerified  bool
 	Roles          []string
-	CompaniesRoles []CompanyRole
+	CompaniesRoles *[]CompanyRoles `json:"companies_roles,omitempty"`
 	SessionID      string
 	Subject        string // Keycloak user ID
 }
@@ -41,50 +41,58 @@ func (u *UserContext) HasAnyOfRoles(companyID string, roles ...string) bool {
 	return false
 }
 
-// GetUserCompanyRole returns user's role for a specific company
-func (u *UserContext) GetUserCompanyRole(companyID string) (string, bool) {
-	for _, company := range u.CompaniesRoles {
-		if company.ID == companyID && company.Status == CompanyStatusVerified {
-			return company.Role, true
+// GetUserCompanyRoles returns user's roles for a specific company
+func (u *UserContext) GetUserCompanyRoles(companyID string) (map[string]string, bool) {
+	roles := make(map[string]string)
+	if u.CompaniesRoles != nil {
+		for _, company := range *u.CompaniesRoles {
+			if company.CompanyID == companyID {
+				for key, val := range company.Roles {
+					if val == CompanyStatusVerified {
+						roles[key] = val
+					}
+				}
+			}
 		}
 	}
-	return "", false
+	return roles, len(roles) > 0
 }
 
 // HasCompanyAccess checks if user has access to a company with any role
 func (u *UserContext) HasCompanyAccess(companyID string) bool {
-	for _, company := range u.CompaniesRoles {
-		if company.ID == companyID && company.Status == CompanyStatusVerified {
-			return true
+	if u.CompaniesRoles != nil {
+		for _, company := range *u.CompaniesRoles {
+			if company.CompanyID == companyID {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-func (u *UserContext) HasCompanyRole(companyID, role string) bool {
-	for _, c := range u.CompaniesRoles {
-		if c.ID == companyID && c.Role == role && c.Status == CompanyStatusVerified {
-			return true
-		}
-	}
-	return false
-}
-
-func (u *UserContext) IsCompanyVerified(companyID string) bool {
-	for _, c := range u.CompaniesRoles {
-		if c.ID == companyID && c.Status == CompanyStatusVerified {
-			return true
-		}
-	}
-	return false
-}
-
-func (u *UserContext) HasAnyOfVerifiedCompanyRoles(companyID string, roles []string) bool {
-	for _, c := range u.CompaniesRoles {
-		if c.ID == companyID && c.Status == CompanyStatusVerified {
-			for _, role := range roles {
-				if c.Role == role {
+func (u *UserContext) HasCompanyRoleWithSpecificStatus(companyID, role, status string) bool {
+	if u.CompaniesRoles != nil {
+		for _, c := range *u.CompaniesRoles {
+			if c.CompanyID == companyID {
+				val, ok := c.Roles[role]
+				if ok && val == status {
 					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func (u *UserContext) HasAnyOfVerifiedCompanyRoles(companyID string, roles ...string) bool {
+	if u.CompaniesRoles != nil {
+		for _, c := range *u.CompaniesRoles {
+			if c.CompanyID == companyID {
+				for _, role := range roles {
+					val, ok := c.Roles[role]
+					if ok && val == CompanyStatusVerified {
+						return true
+					}
 				}
 			}
 		}
@@ -113,22 +121,29 @@ func MustGetUserContext(c *gin.Context) *UserContext {
 }
 
 // GetUserCompanies returns all verified companies for the user
-func (u *UserContext) GetUserCompanies() []CompanyRole {
-	companies := make([]CompanyRole, 0)
-	for _, company := range u.CompaniesRoles {
-		if company.Status == CompanyStatusVerified {
-			companies = append(companies, company)
-		}
+func (u *UserContext) GetUserCompanies() []CompanyRoles {
+	companies := make([]CompanyRoles, 0)
+	// copy companyroles
+	if u.CompaniesRoles != nil {
+		companies = append(companies, *u.CompaniesRoles...)
 	}
 	return companies
 }
 
-// GetCompanyRole returns user's role for a specific company
-func (u *UserContext) GetCompanyRole(companyID string) (string, bool) {
-	for _, company := range u.CompaniesRoles {
-		if company.ID == companyID && company.Status == "VERIFIED" {
-			return company.Role, true
+func (u *UserContext) GetCompanyRoles(companyID string) (map[string]string, bool) {
+	if u.CompaniesRoles == nil {
+		return nil, false
+	}
+
+	for _, company := range *u.CompaniesRoles {
+		if company.CompanyID == companyID {
+			roles := make(map[string]string, len(company.Roles))
+			for k, v := range company.Roles {
+				roles[k] = v
+			}
+			return roles, true
 		}
 	}
-	return "", false
+
+	return nil, false
 }

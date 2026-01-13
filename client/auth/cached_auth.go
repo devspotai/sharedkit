@@ -192,7 +192,7 @@ func (c *CachedAuthClient) ParseToken(ctx context.Context, tokenString string) (
 		Email:          claims.Email,
 		EmailVerified:  claims.EmailVerified,
 		Roles:          claims.RealmAccess.Roles,
-		CompaniesRoles: claims.Companies,
+		CompaniesRoles: &claims.CompaniesRoles,
 		SessionID:      claims.SessionID,
 		Subject:        claims.Subject,
 	}

@@ -26,12 +26,10 @@ type JWK struct {
 }
 
 // CompanyRole represents a company association in the JWT
-type CompanyRole struct {
-	ID            string `json:"id"`
-	Role          string `json:"role"` // OWNER, MANAGER, STAFF
-	CoverImageURL string `json:"cover_image_url,omitempty"`
-	Status        string `json:"status"` // VERIFIED, PENDING, SUSPENDED
-	roles         map[string]interface{}
+type CompanyRoles struct {
+	CompanyID     string            `json:"company_id"`
+	CoverImageURL string            `json:"cover_image_url,omitempty"`
+	Roles         map[string]string `json:"roles,omitempty"` // ADMIN_ALL_EXPERIENCES: VERIFIED, ADMIN_ALL_STAYS: PENDING
 }
 
 // ErrorResponse is a standard error response format

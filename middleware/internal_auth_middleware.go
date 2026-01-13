@@ -208,7 +208,7 @@ func (m *InternalServiceAuth) validateRequest(c *gin.Context) error {
 	}
 
 	// Parse companies
-	companies := []models.CompanyRole{}
+	companies := []models.CompanyRoles{}
 	if companiesStr != "" {
 		if err := json.Unmarshal([]byte(companiesStr), &companies); err != nil {
 			return fmt.Errorf("invalid companies format in headers")
@@ -222,7 +222,7 @@ func (m *InternalServiceAuth) validateRequest(c *gin.Context) error {
 		Email:          email,
 		EmailVerified:  emailVerified,
 		Roles:          roles,
-		CompaniesRoles: companies,
+		CompaniesRoles: &companies,
 	}
 
 	c.Set(models.UserContextKey, userCtx)
@@ -325,7 +325,7 @@ type ForwardedUserHeaders struct {
 	Email         string
 	EmailVerified bool
 	Roles         []string
-	Companies     []models.CompanyRole
+	Companies     []models.CompanyRoles
 }
 
 // ExtractForwardedUserContext extracts user context from headers set by Traefik
@@ -352,7 +352,7 @@ func ExtractForwardedUserContext(c *gin.Context) (*ForwardedUserHeaders, error) 
 
 	// Parse companies from JSON header
 	companiesStr := c.GetHeader("X-User-Companies")
-	var companies []models.CompanyRole
+	var companies []models.CompanyRoles
 	if companiesStr != "" {
 		// In production, parse JSON. For simplicity, we'll leave it empty
 		// json.Unmarshal([]byte(companiesStr), &companies)
