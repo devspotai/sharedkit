@@ -9,17 +9,22 @@ import (
 	"github.com/devspotai/sharedkit/client/cache"
 	"github.com/devspotai/sharedkit/models"
 	"github.com/golang-jwt/jwt/v5"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type CachedAuthClient struct {
 	KeycloakClient *KeycloakClient
 	cache          *cache.RedisCache
+	tracer         trace.Tracer
 }
 
 func NewCachedAuthClient(keycloakClient *KeycloakClient, cache *cache.RedisCache) *CachedAuthClient {
 	return &CachedAuthClient{
 		KeycloakClient: keycloakClient,
 		cache:          cache,
+		tracer:         otel.Tracer("cached-auth"),
 	}
 }
 
@@ -55,12 +60,16 @@ func (c *CachedAuthClient) FetchAndCachePublicKeys(keycloakUserID, suffix string
 }
 
 // GetPublicKey with caching
-func (c *CachedAuthClient) GetPublicKey(kid string) (*rsa.PublicKey, error) {
-	ctx := context.Background()
+func (c *CachedAuthClient) GetPublicKey(ctx context.Context, kid string) (*rsa.PublicKey, error) {
+	ctx, span := c.tracer.Start(ctx, "cached_auth.get_public_key")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("key.kid", kid))
 	cacheKey := c.getCacheKey(kid)
 
 	// Try in-memory first
 	if publicKey, err := c.KeycloakClient.GetInMemoryPublicKey(kid); err == nil {
+		span.SetAttributes(attribute.String("cache.source", "memory"))
 		return publicKey, nil
 	}
 
@@ -71,13 +80,16 @@ func (c *CachedAuthClient) GetPublicKey(kid string) (*rsa.PublicKey, error) {
 			c.KeycloakClient.publicKeyMutex.Lock()
 			defer c.KeycloakClient.publicKeyMutex.Unlock()
 			c.KeycloakClient.publicKeys[kid] = publicKey
+			span.SetAttributes(attribute.String("cache.source", "redis"))
 			return publicKey, nil
 		}
 	}
 
 	// Cache miss - fetch from Keycloak
-	publicKeyJson, publicKey, err := c.KeycloakClient.FetchPublicKey(kid)
+	span.SetAttributes(attribute.String("cache.source", "keycloak"))
+	publicKeyJson, publicKey, err := c.KeycloakClient.FetchPublicKey(ctx, kid)
 	if err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
 
@@ -88,19 +100,25 @@ func (c *CachedAuthClient) GetPublicKey(kid string) (*rsa.PublicKey, error) {
 }
 
 // GetAdminToken with caching
-func (c *CachedAuthClient) GetAdminToken() (string, error) {
-	ctx := context.Background()
+func (c *CachedAuthClient) GetAdminToken(ctx context.Context) (string, error) {
+	ctx, span := c.tracer.Start(ctx, "cached_auth.get_admin_token")
+	defer span.End()
+
 	cacheKey := "keycloak:admin_token"
 
 	// Try cache first
 	var cachedToken string
 	if err := c.cache.Get(ctx, cacheKey, &cachedToken); err == nil {
+		span.SetAttributes(attribute.Bool("cache.hit", true))
 		return cachedToken, nil
 	}
 
+	span.SetAttributes(attribute.Bool("cache.hit", false))
+
 	// Cache miss - get new token
-	token, err := c.KeycloakClient.GetAdminToken()
+	token, err := c.KeycloakClient.GetAdminToken(ctx)
 	if err != nil {
+		span.RecordError(err)
 		return "", err
 	}
 
@@ -126,17 +144,16 @@ func (c *CachedAuthClient) DeleteAllUserCache(keycloakUserID string) error {
 	return c.cache.DeletePattern(ctx, fmt.Sprintf("user:*:%s:*", keycloakUserID))
 }
 
-func (c *CachedAuthClient) GetOrCachePublicKeys(keycloakUserID string) error {
-	ctx := context.Background()
-	return c.cache.DeletePattern(ctx, fmt.Sprintf("user:*:%s:*", keycloakUserID))
-}
-
 // UpdateUserAttributes with cache invalidation
-func (c *CachedAuthClient) UpdateUserAttributes(keycloakUserID string, attributes map[string][]string, adminToken string) error {
-	ctx := context.Background()
+func (c *CachedAuthClient) UpdateUserAttributes(ctx context.Context, keycloakUserID string, attributes map[string][]string, adminToken string) error {
+	ctx, span := c.tracer.Start(ctx, "cached_auth.update_user_attributes")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("keycloak.user_id", keycloakUserID))
 
 	// Update in Keycloak
-	if err := c.KeycloakClient.UpdateUserAttributes(keycloakUserID, adminToken, attributes); err != nil {
+	if err := c.KeycloakClient.UpdateUserAttributes(ctx, keycloakUserID, adminToken, attributes); err != nil {
+		span.RecordError(err)
 		return err
 	}
 
@@ -147,7 +164,9 @@ func (c *CachedAuthClient) UpdateUserAttributes(keycloakUserID string, attribute
 }
 
 // ParseToken parses and validates the JWT token
-func (c *CachedAuthClient) ParseToken(ctx context.Context, tokenString string) (*models.UserContext, bool, error) {
+func (c *CachedAuthClient) ParseToken(ctx context.Context, tokenString string) (*models.UserContext, error) {
+	ctx, span := c.tracer.Start(ctx, "cached_auth.parse_token")
+	defer span.End()
 
 	// Parse token with custom claims
 	token, err := jwt.ParseWithClaims(tokenString, &models.KeycloakClaims{}, func(token *jwt.Token) (interface{}, error) {
@@ -159,7 +178,7 @@ func (c *CachedAuthClient) ParseToken(ctx context.Context, tokenString string) (
 		if !ok {
 			return nil, fmt.Errorf("missing kid in token header")
 		}
-		publicKey, err := c.GetPublicKey(kid)
+		publicKey, err := c.GetPublicKey(ctx, kid)
 		if err != nil {
 			return nil, err
 		}
@@ -168,22 +187,32 @@ func (c *CachedAuthClient) ParseToken(ctx context.Context, tokenString string) (
 	})
 
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to parse token: %w", err)
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("token.valid", false))
+		return nil, fmt.Errorf("failed to parse token: %w", err)
 	}
 
 	if !token.Valid {
-		return nil, token.Valid, fmt.Errorf("invalid token")
+		span.SetAttributes(attribute.Bool("token.valid", false))
+		return nil, fmt.Errorf("invalid token")
 	}
 
 	claims, ok := token.Claims.(*models.KeycloakClaims)
 	if !ok {
-		return nil, token.Valid, fmt.Errorf("invalid claims type")
+		span.SetAttributes(attribute.Bool("token.valid", false))
+		return nil, fmt.Errorf("invalid claims type")
 	}
 
 	// Verify token expiration
 	if claims.ExpiresAt != nil && claims.ExpiresAt.Before(time.Now()) {
-		return nil, token.Valid, fmt.Errorf("token expired")
+		span.SetAttributes(attribute.Bool("token.valid", false))
+		return nil, fmt.Errorf("token expired")
 	}
+
+	span.SetAttributes(
+		attribute.Bool("token.valid", true),
+		attribute.String("user.id", claims.UserID),
+	)
 
 	// Build user context
 	userCtx := &models.UserContext{
@@ -197,5 +226,5 @@ func (c *CachedAuthClient) ParseToken(ctx context.Context, tokenString string) (
 		Subject:        claims.Subject,
 	}
 
-	return userCtx, token.Valid, nil
+	return userCtx, nil
 }

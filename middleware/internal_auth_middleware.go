@@ -19,6 +19,9 @@ import (
 
 	"github.com/devspotai/sharedkit/client/cache"
 	"github.com/devspotai/sharedkit/models"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // InternalServiceAuth middleware ensures only Traefik can call internal services
@@ -31,10 +34,11 @@ type InternalServiceAuth struct {
 	publicPaths   map[string]bool
 	includeMethod bool //Include HTTP method in HMAC signature
 	includePath   bool //Include request path in HMAC signature
+	tracer        trace.Tracer
 }
 
 // NewInternalServiceAuth creates a new internal service authentication middleware
-func NewInternalServiceAuth(sharedSecret string, cache *cache.RedisCache, nonceTtl time.Duration, allowedSkew time.Duration,
+func NewInternalServiceAuth(sharedSecret string, cache *cache.RedisCache, nonceTTL time.Duration, allowedSkew time.Duration,
 	publicPaths []string, includeMethod bool, includePath bool) *InternalServiceAuth {
 	if sharedSecret == "" {
 		panic("internal auth secret cannot be empty")
@@ -43,8 +47,8 @@ func NewInternalServiceAuth(sharedSecret string, cache *cache.RedisCache, nonceT
 		panic("internal auth cache cannot be nil")
 	}
 	// Set defaults
-	if nonceTtl == 0 {
-		nonceTtl = 5 * time.Minute
+	if nonceTTL == 0 {
+		nonceTTL = 5 * time.Minute
 	}
 	if allowedSkew == 0 {
 		allowedSkew = 30 * time.Second
@@ -57,11 +61,12 @@ func NewInternalServiceAuth(sharedSecret string, cache *cache.RedisCache, nonceT
 	return &InternalServiceAuth{
 		sharedSecret:  sharedSecret,
 		cache:         cache,
-		nonceTTL:      nonceTtl,
+		nonceTTL:      nonceTTL,
 		allowedSkew:   allowedSkew,
 		publicPaths:   publicPathsMap,
 		includeMethod: includeMethod,
 		includePath:   includePath,
+		tracer:        otel.Tracer("internal-auth"),
 	}
 }
 
@@ -150,6 +155,9 @@ func (m *InternalServiceAuth) MiddlewareWithPublicPaths(publicPaths ...string) g
 
 // validateRequest performs full HMAC and nonce validation
 func (m *InternalServiceAuth) validateRequest(c *gin.Context) error {
+	ctx, span := m.tracer.Start(c.Request.Context(), "internal_auth.validate")
+	defer span.End()
+
 	// Get headers from gateway
 	signature := c.GetHeader("X-Internal-Auth")
 	nonce := c.GetHeader("X-Request-Nonce")
@@ -161,14 +169,25 @@ func (m *InternalServiceAuth) validateRequest(c *gin.Context) error {
 	companiesStr := c.GetHeader("X-Companies")
 	timestampStr := c.GetHeader("X-Timestamp")
 
+	span.SetAttributes(
+		attribute.String("auth.user_id", userID),
+		attribute.String("http.method", c.Request.Method),
+		attribute.String("http.path", c.Request.URL.Path),
+	)
+
 	// Validate required headers
 	if signature == "" || userID == "" || nonce == "" || timestampStr == "" {
-		return fmt.Errorf("missing required auth headers")
+		err := fmt.Errorf("missing required auth headers")
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("auth.valid", false))
+		return err
 	}
 
 	// Validate timestamp
 	timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
 	if err != nil {
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("auth.valid", false))
 		return fmt.Errorf("invalid timestamp format")
 	}
 
@@ -177,16 +196,24 @@ func (m *InternalServiceAuth) validateRequest(c *gin.Context) error {
 
 	// Check if request is from the future (clock skew protection)
 	if reqTime.After(now.Add(m.allowedSkew)) {
-		return fmt.Errorf("timestamp too far in future")
+		err := fmt.Errorf("timestamp too far in future")
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("auth.valid", false))
+		return err
 	}
 
 	// Check if request is too old
 	if now.Sub(reqTime) > m.nonceTTL {
-		return fmt.Errorf("request expired")
+		err := fmt.Errorf("request expired")
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("auth.valid", false))
+		return err
 	}
 
 	// Validate nonce (prevent replay attacks)
-	if err := m.validateNonce(c.Request.Context(), nonce, userID, timestamp); err != nil {
+	if err := m.validateNonce(ctx, nonce, userID, timestamp); err != nil {
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("auth.valid", false))
 		return err
 	}
 
@@ -198,7 +225,10 @@ func (m *InternalServiceAuth) validateRequest(c *gin.Context) error {
 
 	// Constant-time comparison to prevent timing attacks
 	if !hmac.Equal([]byte(signature), []byte(expected)) {
-		return fmt.Errorf("invalid signature")
+		err := fmt.Errorf("invalid signature")
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("auth.valid", false))
+		return err
 	}
 
 	// Parse roles
@@ -211,6 +241,8 @@ func (m *InternalServiceAuth) validateRequest(c *gin.Context) error {
 	companies := []models.CompanyRoles{}
 	if companiesStr != "" {
 		if err := json.Unmarshal([]byte(companiesStr), &companies); err != nil {
+			span.RecordError(err)
+			span.SetAttributes(attribute.Bool("auth.valid", false))
 			return fmt.Errorf("invalid companies format in headers")
 		}
 	}
@@ -226,6 +258,7 @@ func (m *InternalServiceAuth) validateRequest(c *gin.Context) error {
 	}
 
 	c.Set(models.UserContextKey, userCtx)
+	span.SetAttributes(attribute.Bool("auth.valid", true))
 	return nil
 }
 
@@ -281,13 +314,23 @@ func (m *InternalServiceAuth) isPublicPath(c *gin.Context) bool {
 
 // validateNonce checks if nonce has been used before
 func (m *InternalServiceAuth) validateNonce(ctx context.Context, nonce, userID string, timestamp int64) error {
+	ctx, span := m.tracer.Start(ctx, "internal_auth.validate_nonce")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("auth.user_id", userID))
+
 	// Validate nonce format (must be hex string, 32 characters minimum)
 	if len(nonce) < 32 {
-		return fmt.Errorf("nonce too short (minimum 32 characters)")
+		err := fmt.Errorf("nonce too short (minimum 32 characters)")
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("nonce.valid", false))
+		return err
 	}
 
 	// Verify nonce is valid hex
 	if _, err := hex.DecodeString(nonce); err != nil {
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("nonce.valid", false))
 		return fmt.Errorf("nonce must be hex string")
 	}
 
@@ -301,15 +344,21 @@ func (m *InternalServiceAuth) validateNonce(ctx context.Context, nonce, userID s
 	// SetNX returns true if key was set, false if already exists
 	wasSet, err := m.cache.SetNX(ctx, nonceKey, []byte("1"), m.nonceTTL)
 	if err != nil {
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("nonce.valid", false))
 		return fmt.Errorf("redis error checking nonce: %w", err)
 	}
 
 	if !wasSet {
 		// Nonce already exists - replay attack detected!
-		return fmt.Errorf("nonce already used - replay attack detected")
+		err := fmt.Errorf("nonce already used - replay attack detected")
+		span.RecordError(err)
+		span.SetAttributes(attribute.Bool("nonce.valid", false))
+		return err
 	}
 
 	// Nonce is valid and has been recorded
+	span.SetAttributes(attribute.Bool("nonce.valid", true))
 	return nil
 }
 

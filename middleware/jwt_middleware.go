@@ -57,16 +57,10 @@ func (m *JWTMiddleware) Middleware() gin.HandlerFunc {
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
 		// Parse and validate token
-		userCtx, tokenValid, err := m.authClient.ParseToken(ctx, tokenString)
+		userCtx, err := m.authClient.ParseToken(ctx, tokenString)
 		if err != nil {
 			span.RecordError(err)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token", "details": err.Error()})
-			c.Abort()
-			return
-		}
-		if !tokenValid {
-			span.RecordError(fmt.Errorf("invalid token"))
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			c.Abort()
 			return
 		}

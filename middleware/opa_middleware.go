@@ -10,12 +10,16 @@ import (
 
 	"github.com/devspotai/sharedkit/models"
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type OPAMiddleware struct {
 	OPAEndpoint string
 	httpClient  *http.Client
 	policyPath  string
+	tracer      trace.Tracer
 }
 
 type OPAConfig struct {
@@ -32,6 +36,7 @@ func NewOPAMiddleware(config OPAConfig) *OPAMiddleware {
 		OPAEndpoint: config.OPAEndpoint,
 		httpClient:  &http.Client{Timeout: config.Timeout},
 		policyPath:  config.PolicyPath,
+		tracer:      otel.Tracer("opa-middleware"),
 	}
 }
 
@@ -41,11 +46,20 @@ func NewOPAMiddleware(config OPAConfig) *OPAMiddleware {
 
 func (m *OPAMiddleware) Authorize() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		startTime := time.Now()
+		ctx, span := m.tracer.Start(c.Request.Context(), "opa.authorize")
+		defer span.End()
+
+		span.SetAttributes(
+			attribute.String("http.method", c.Request.Method),
+			attribute.String("http.path", c.Request.URL.Path),
+			attribute.String("opa.policy_path", m.policyPath),
+		)
 
 		// 1. Get user context from JWT middleware
 		userCtx, exists := models.GetUserContext(c)
 		if !exists {
+			span.SetAttributes(attribute.Bool("opa.decision", false))
+			span.RecordError(fmt.Errorf("no user context"))
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "unauthorized - no user context",
 			})
@@ -53,18 +67,24 @@ func (m *OPAMiddleware) Authorize() gin.HandlerFunc {
 			return
 		}
 
+		span.SetAttributes(attribute.String("user.id", userCtx.UserID))
+
 		// 2. Build OPA input from request
 		opaInput := m.buildOPAInput(c, userCtx)
 
 		// 3. Query OPA for authorization decision
-		decision, err := m.queryOPA(c.Request.Context(), opaInput)
+		decision, err := m.queryOPA(ctx, opaInput)
 		if err != nil {
+			span.RecordError(err)
+			span.SetAttributes(attribute.Bool("opa.decision", false))
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "authorization check failed",
 			})
 			c.Abort()
 			return
 		}
+
+		span.SetAttributes(attribute.Bool("opa.decision", decision.Allow))
 
 		// 4. Check decision
 		if !decision.Allow {
@@ -75,9 +95,6 @@ func (m *OPAMiddleware) Authorize() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-
-		// 5. Add decision metadata to context (optional)
-		c.Set("opa_decision_time", time.Since(startTime))
 
 		c.Next()
 	}
@@ -114,6 +131,14 @@ func (m *OPAMiddleware) buildOPAInput(c *gin.Context, userCtx *models.UserContex
 // ============================================================
 
 func (m *OPAMiddleware) queryOPA(ctx context.Context, input map[string]interface{}) (*OPADecision, error) {
+	ctx, span := m.tracer.Start(ctx, "opa.query")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("opa.endpoint", m.OPAEndpoint),
+		attribute.String("opa.policy_path", m.policyPath),
+	)
+
 	// Build OPA request
 	opaRequest := map[string]interface{}{
 		"input": input,
@@ -121,6 +146,7 @@ func (m *OPAMiddleware) queryOPA(ctx context.Context, input map[string]interface
 
 	requestBody, err := json.Marshal(opaRequest)
 	if err != nil {
+		span.RecordError(err)
 		return nil, fmt.Errorf("failed to marshal OPA request: %w", err)
 	}
 
@@ -135,6 +161,7 @@ func (m *OPAMiddleware) queryOPA(ctx context.Context, input map[string]interface
 		bytes.NewReader(requestBody),
 	)
 	if err != nil {
+		span.RecordError(err)
 		return nil, fmt.Errorf("failed to create OPA request: %w", err)
 	}
 
@@ -143,9 +170,12 @@ func (m *OPAMiddleware) queryOPA(ctx context.Context, input map[string]interface
 	// Execute request
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
+		span.RecordError(err)
 		return nil, fmt.Errorf("failed to query OPA: %w", err)
 	}
 	defer resp.Body.Close()
+
+	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
 
 	// Parse response
 	var opaResponse struct {
@@ -153,8 +183,11 @@ func (m *OPAMiddleware) queryOPA(ctx context.Context, input map[string]interface
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&opaResponse); err != nil {
+		span.RecordError(err)
 		return nil, fmt.Errorf("failed to decode OPA response: %w", err)
 	}
+
+	span.SetAttributes(attribute.Bool("opa.decision", opaResponse.Result.Allow))
 
 	return &OPADecision{
 		Allow:  opaResponse.Result.Allow,
@@ -202,12 +235,25 @@ type OPAResult struct {
 // AuthorizeResource - For specific resource checks (company, stay, etc.)
 func (m *OPAMiddleware) AuthorizeResource(resourceType, resourceID string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		ctx, span := m.tracer.Start(c.Request.Context(), "opa.authorize_resource")
+		defer span.End()
+
+		span.SetAttributes(
+			attribute.String("resource.type", resourceType),
+			attribute.String("resource.id", resourceID),
+			attribute.String("http.method", c.Request.Method),
+		)
+
 		userCtx, exists := models.GetUserContext(c)
 		if !exists {
+			span.SetAttributes(attribute.Bool("opa.decision", false))
+			span.RecordError(fmt.Errorf("no user context"))
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			c.Abort()
 			return
 		}
+
+		span.SetAttributes(attribute.String("user.id", userCtx.UserID))
 
 		// Build resource-specific input
 		opaInput := map[string]interface{}{
@@ -223,12 +269,16 @@ func (m *OPAMiddleware) AuthorizeResource(resourceType, resourceID string) gin.H
 			},
 		}
 
-		decision, err := m.queryOPA(c.Request.Context(), opaInput)
+		decision, err := m.queryOPA(ctx, opaInput)
 		if err != nil {
+			span.RecordError(err)
+			span.SetAttributes(attribute.Bool("opa.decision", false))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "authorization failed"})
 			c.Abort()
 			return
 		}
+
+		span.SetAttributes(attribute.Bool("opa.decision", decision.Allow))
 
 		if !decision.Allow {
 			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
@@ -295,6 +345,7 @@ type TwoTierAuthConfig struct {
 type TwoTierAuthMiddleware struct {
 	companyMiddleware  *OPAMiddleware
 	resourceMiddleware *OPAMiddleware
+	tracer             trace.Tracer
 }
 
 func NewTwoTierAuthMiddleware(config TwoTierAuthConfig) *TwoTierAuthMiddleware {
@@ -307,18 +358,34 @@ func NewTwoTierAuthMiddleware(config TwoTierAuthConfig) *TwoTierAuthMiddleware {
 			OPAEndpoint: config.ResourceOPAURL,
 			PolicyPath:  config.ResourcePolicyPath,
 		}),
+		tracer: otel.Tracer("opa-two-tier-middleware"),
 	}
 }
 
 // Authorize - Two-tier check: company access + resource access
 func (m *TwoTierAuthMiddleware) Authorize() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		ctx, span := m.tracer.Start(c.Request.Context(), "opa.two_tier_authorize")
+		defer span.End()
+
+		companyID := c.Param("companyId")
+		stayID := c.Param("stayId")
+
+		span.SetAttributes(
+			attribute.String("company.id", companyID),
+			attribute.String("stay.id", stayID),
+			attribute.String("http.method", c.Request.Method),
+		)
+
 		userCtx, exists := models.GetUserContext(c)
 		if !exists {
+			span.RecordError(fmt.Errorf("no user context"))
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			c.Abort()
 			return
 		}
+
+		span.SetAttributes(attribute.String("user.id", userCtx.UserID))
 
 		// TIER 1: Check company access
 		companyInput := map[string]interface{}{
@@ -326,12 +393,24 @@ func (m *TwoTierAuthMiddleware) Authorize() gin.HandlerFunc {
 				"user_id": userCtx.UserID,
 			},
 			"request": map[string]interface{}{
-				"company_id": c.Param("companyId"),
+				"company_id": companyID,
 			},
 		}
 
-		companyDecision, err := m.companyMiddleware.queryOPA(c.Request.Context(), companyInput)
-		if err != nil || !companyDecision.Allow {
+		companyDecision, err := m.companyMiddleware.queryOPA(ctx, companyInput)
+		if err != nil {
+			span.RecordError(err)
+			span.SetAttributes(attribute.Bool("opa.company_decision", false))
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "no company access",
+			})
+			c.Abort()
+			return
+		}
+
+		span.SetAttributes(attribute.Bool("opa.company_decision", companyDecision.Allow))
+
+		if !companyDecision.Allow {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": "no company access",
 			})
@@ -345,13 +424,25 @@ func (m *TwoTierAuthMiddleware) Authorize() gin.HandlerFunc {
 				"user_id": userCtx.UserID,
 			},
 			"request": map[string]interface{}{
-				"stay_id": c.Param("stayId"),
+				"stay_id": stayID,
 				"action":  mapMethodToAction(c.Request.Method),
 			},
 		}
 
-		resourceDecision, err := m.resourceMiddleware.queryOPA(c.Request.Context(), resourceInput)
-		if err != nil || !resourceDecision.Allow {
+		resourceDecision, err := m.resourceMiddleware.queryOPA(ctx, resourceInput)
+		if err != nil {
+			span.RecordError(err)
+			span.SetAttributes(attribute.Bool("opa.resource_decision", false))
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "no resource access",
+			})
+			c.Abort()
+			return
+		}
+
+		span.SetAttributes(attribute.Bool("opa.resource_decision", resourceDecision.Allow))
+
+		if !resourceDecision.Allow {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": "no resource access",
 			})

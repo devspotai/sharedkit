@@ -32,7 +32,7 @@ func (u *UserContext) HasRole(role string) bool {
 	return false
 }
 
-func (u *UserContext) HasAnyOfRoles(companyID string, roles ...string) bool {
+func (u *UserContext) HasAnyOfRoles(roles ...string) bool {
 	for _, required := range roles {
 		if u.HasRole(required) {
 			return true
