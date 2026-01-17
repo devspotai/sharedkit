@@ -8,8 +8,13 @@ all: test
 
 ## ---------- Basic Go tasks ---------- ##
 
+## Run with coverage + race detector
 test:
-	go test ./...
+	$(GO) test -race -cover -coverprofile=coverage.out ./...
+
+test-html:
+	$(GO) tool cover -html=coverage.out -o coverage.html
+
 
 tidy:
 	go mod tidy

@@ -36,9 +36,10 @@ type SetOp struct {
 type PipelineSetter func(key string, value any, ttl time.Duration)
 type PipelineDeleter func(key string)
 
-func NewRedisCache(addr, password string, db int) (*RedisCache, error) {
+func NewRedisCache(addr, username, password string, db int) (*RedisCache, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:     addr,
+		Username: username, // empty string is fine if not using ACL users
 		Password: password,
 		DB:       db,
 	})
@@ -60,6 +61,7 @@ func NewRedisCache(addr, password string, db int) (*RedisCache, error) {
 func NewRedisCacheFromConfig(cfg *config.RedisConfig) *RedisCache {
 	client := redis.NewClient(&redis.Options{
 		Addr:         cfg.URL,
+		Username:     cfg.Username,
 		Password:     cfg.Password,
 		DB:           cfg.DB,
 		MaxRetries:   cfg.MaxRetries,

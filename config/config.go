@@ -52,6 +52,7 @@ type ConnectionPoolConfig struct {
 // RedisConfig holds Redis connection configuration
 type RedisConfig struct {
 	URL               string
+	Username          string
 	Password          string
 	DB                int
 	MaxRetries        int
