@@ -186,6 +186,38 @@ func (c *CachedAuthClient) ParseToken(ctx context.Context, tokenString string) (
 		return publicKey, nil
 	})
 
+	//if token fails validation because public key in cache was old, retrieve public key from keycloack
+	// If parsing failed, attempt to refresh the public key from Keycloak and retry once.
+	// This handles the case where the cached public key is stale.
+	if err != nil {
+		// only attempt refresh if we have a parsed token header with a kid
+		if token != nil && token.Header != nil {
+			if kid, ok := token.Header["kid"].(string); ok && kid != "" {
+				span.SetAttributes(attribute.String("cache.refresh.kid", kid))
+				publicKeyJson, publicKey, fetchErr := c.KeycloakClient.FetchPublicKey(ctx, kid)
+				if fetchErr == nil {
+					// update cache (best-effort)
+					_ = c.cache.Set(ctx, c.getCacheKey(kid), publicKeyJson, 24*time.Hour)
+
+					// retry parse with the freshly fetched key
+					token, err = jwt.ParseWithClaims(tokenString, &models.KeycloakClaims{}, func(token *jwt.Token) (interface{}, error) {
+						if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+							return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+						}
+						return publicKey, nil
+					})
+					if err == nil {
+						span.SetAttributes(attribute.Bool("cache.refreshed", true))
+					} else {
+						span.RecordError(err)
+					}
+				} else {
+					span.RecordError(fetchErr)
+				}
+			}
+		}
+	}
+
 	if err != nil {
 		span.RecordError(err)
 		span.SetAttributes(attribute.Bool("token.valid", false))
