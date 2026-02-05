@@ -2,11 +2,11 @@ package middleware
 
 import (
 	"fmt"
-
 	"net/http"
 	"strings"
 
 	"github.com/devspotai/sharedkit/client/auth"
+	"github.com/devspotai/sharedkit/models"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -66,12 +66,7 @@ func (m *JWTMiddleware) Middleware() gin.HandlerFunc {
 		}
 
 		// Add user context to Gin context
-		c.Set("user", userCtx)
-		c.Set("user_id", userCtx.UserID)
-		c.Set("host_id", userCtx.HostID)
-		c.Set("email", userCtx.Email)
-		c.Set("roles", userCtx.Roles)
-		c.Set("companies", userCtx.CompaniesRoles)
+		c.Set(models.UserContextKey, userCtx)
 
 		// Add user info to trace
 		span.SetAttributes(

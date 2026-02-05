@@ -1,84 +1,69 @@
 package middleware
 
 import (
-	"context"
-	"crypto/hmac"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
-
 	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"golang.org/x/crypto/sha3"
+	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/devspotai/sharedkit/client/cache"
 	"github.com/devspotai/sharedkit/models"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
-// InternalServiceAuth middleware ensures only Traefik can call internal services
-// This prevents malicious clients from injecting headers to bypass authentication
-type InternalServiceAuth struct {
-	sharedSecret  string
-	cache         *cache.RedisCache
-	nonceTTL      time.Duration
-	allowedSkew   time.Duration
-	publicPaths   map[string]bool
-	includeMethod bool //Include HTTP method in HMAC signature
-	includePath   bool //Include request path in HMAC signature
-	tracer        trace.Tracer
+// InternalJWTAuth middleware validates internal JWTs from the API gateway
+type InternalJWTAuth struct {
+	jwtSecret   []byte
+	publicPaths map[string]bool
+	tracer      trace.Tracer
 }
 
-// NewInternalServiceAuth creates a new internal service authentication middleware
-func NewInternalServiceAuth(sharedSecret string, cache *cache.RedisCache, nonceTTL time.Duration, allowedSkew time.Duration,
-	publicPaths []string, includeMethod bool, includePath bool) *InternalServiceAuth {
-	if sharedSecret == "" {
-		panic("internal auth secret cannot be empty")
+// InternalJWTClaims represents the claims in the internal JWT from the gateway
+type InternalJWTClaims struct {
+	UserID              string                    `json:"user_id"`
+	Email               string                    `json:"email"`
+	KeycloakID          string                    `json:"keycloak_id"`
+	CompanyRoles        map[string]CompanyRole    `json:"company_roles"`
+	HasAnyCompanyAccess bool                      `json:"has_company_access"`
+	ManagedCompanyIDs   []string                  `json:"managed_companies,omitempty"`
+	jwt.RegisteredClaims
+}
+
+// CompanyRole represents a user's roles in a company
+type CompanyRole struct {
+	Roles                  []string `json:"roles"`
+	HasGranularPermissions bool     `json:"has_granular_perms"`
+}
+
+// NewInternalJWTAuth creates a new internal JWT authentication middleware
+func NewInternalJWTAuth(jwtSecret string, publicPaths []string) *InternalJWTAuth {
+	if jwtSecret == "" {
+		panic("internal JWT secret cannot be empty")
 	}
-	if cache == nil {
-		panic("internal auth cache cannot be nil")
-	}
-	// Set defaults
-	if nonceTTL == 0 {
-		nonceTTL = 5 * time.Minute
-	}
-	if allowedSkew == 0 {
-		allowedSkew = 30 * time.Second
-	}
+
 	// Convert public paths slice to map for O(1) lookup
 	publicPathsMap := make(map[string]bool)
 	for _, path := range publicPaths {
 		publicPathsMap[path] = true
 	}
-	return &InternalServiceAuth{
-		sharedSecret:  sharedSecret,
-		cache:         cache,
-		nonceTTL:      nonceTTL,
-		allowedSkew:   allowedSkew,
-		publicPaths:   publicPathsMap,
-		includeMethod: includeMethod,
-		includePath:   includePath,
-		tracer:        otel.Tracer("internal-auth"),
+
+	return &InternalJWTAuth{
+		jwtSecret:   []byte(jwtSecret),
+		publicPaths: publicPathsMap,
+		tracer:      otel.Tracer("internal-jwt-auth"),
 	}
 }
 
 // Middleware returns the Gin middleware handler
-// Middleware validates HMAC signature from API gateway
-func (m *InternalServiceAuth) Middleware() gin.HandlerFunc {
+func (m *InternalJWTAuth) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if m.isPublicPath(c) {
 			c.Next()
 			return
 		}
-		// Not a public path - require authentication
+
 		if err := m.validateRequest(c); err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": err.Error(),
@@ -92,8 +77,7 @@ func (m *InternalServiceAuth) Middleware() gin.HandlerFunc {
 }
 
 // MiddlewareRequired always requires authentication (no public paths)
-// Use this for route groups that should always be authenticated
-func (m *InternalServiceAuth) MiddlewareRequired() gin.HandlerFunc {
+func (m *InternalJWTAuth) MiddlewareRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := m.validateRequest(c); err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -108,8 +92,7 @@ func (m *InternalServiceAuth) MiddlewareRequired() gin.HandlerFunc {
 
 // MiddlewareOptional allows requests without authentication
 // Sets user context if valid auth headers present, otherwise continues without
-// Use this for endpoints that work both authenticated and unauthenticated
-func (m *InternalServiceAuth) MiddlewareOptional() gin.HandlerFunc {
+func (m *InternalJWTAuth) MiddlewareOptional() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Try to validate, but don't abort if validation fails
 		_ = m.validateRequest(c)
@@ -117,178 +100,89 @@ func (m *InternalServiceAuth) MiddlewareOptional() gin.HandlerFunc {
 	}
 }
 
-// MiddlewareWithPublicPaths creates middleware with specific public paths
-// Use this when you want to override the configured public paths for a specific route group
-func (m *InternalServiceAuth) MiddlewareWithPublicPaths(publicPaths ...string) gin.HandlerFunc {
-	publicMap := make(map[string]bool)
-	for _, path := range publicPaths {
-		publicMap[path] = true
-	}
-
-	return func(c *gin.Context) {
-		// Check against provided public paths
-		fullPath := c.FullPath()
-		if fullPath != "" && publicMap[fullPath] {
-			c.Next()
-			return
-		}
-
-		// Also check request path (for wildcards)
-		requestPath := c.Request.URL.Path
-		if publicMap[requestPath] {
-			c.Next()
-			return
-		}
-
-		// Not public - require authentication
-		if err := m.validateRequest(c); err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": err.Error(),
-			})
-			c.Abort()
-			return
-		}
-
-		c.Next()
-	}
-}
-
-// validateRequest performs full HMAC and nonce validation
-func (m *InternalServiceAuth) validateRequest(c *gin.Context) error {
-	ctx, span := m.tracer.Start(c.Request.Context(), "internal_auth.validate")
+// validateRequest validates the internal JWT and sets user context
+func (m *InternalJWTAuth) validateRequest(c *gin.Context) error {
+	ctx, span := m.tracer.Start(c.Request.Context(), "internal_jwt_auth.validate")
 	defer span.End()
 
-	// Get headers from gateway
-	signature := c.GetHeader("X-Internal-Auth")
-	nonce := c.GetHeader("X-Request-Nonce")
-	userID := c.GetHeader("X-User-ID")
-	hostID := c.GetHeader("X-Host-ID")
-	email := c.GetHeader("X-User-Email")
-	emailVerified := c.GetHeader("X-Email-Verified") == "true"
-	rolesStr := c.GetHeader("X-User-Roles")
-	companiesStr := c.GetHeader("X-Companies")
-	timestampStr := c.GetHeader("X-Timestamp")
-
-	span.SetAttributes(
-		attribute.String("auth.user_id", userID),
-		attribute.String("http.method", c.Request.Method),
-		attribute.String("http.path", c.Request.URL.Path),
-	)
-
-	// Validate required headers
-	if signature == "" || userID == "" || nonce == "" || timestampStr == "" {
-		err := fmt.Errorf("missing required auth headers")
+	// Get internal JWT from header
+	tokenString := c.GetHeader("X-Internal-JWT")
+	if tokenString == "" {
+		err := fmt.Errorf("missing X-Internal-JWT header")
 		span.RecordError(err)
 		span.SetAttributes(attribute.Bool("auth.valid", false))
 		return err
 	}
 
-	// Validate timestamp
-	timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
+	// Parse and validate JWT
+	claims, err := m.parseToken(tokenString)
 	if err != nil {
 		span.RecordError(err)
 		span.SetAttributes(attribute.Bool("auth.valid", false))
-		return fmt.Errorf("invalid timestamp format")
+		return fmt.Errorf("invalid token: %w", err)
 	}
 
-	now := time.Now()
-	reqTime := time.Unix(timestamp, 0)
+	span.SetAttributes(
+		attribute.String("auth.user_id", claims.UserID),
+		attribute.String("auth.email", claims.Email),
+		attribute.Bool("auth.has_company_access", claims.HasAnyCompanyAccess),
+	)
 
-	// Check if request is from the future (clock skew protection)
-	if reqTime.After(now.Add(m.allowedSkew)) {
-		err := fmt.Errorf("timestamp too far in future")
-		span.RecordError(err)
-		span.SetAttributes(attribute.Bool("auth.valid", false))
-		return err
-	}
-
-	// Check if request is too old
-	if now.Sub(reqTime) > m.nonceTTL {
-		err := fmt.Errorf("request expired")
-		span.RecordError(err)
-		span.SetAttributes(attribute.Bool("auth.valid", false))
-		return err
-	}
-
-	// Validate nonce (prevent replay attacks)
-	if err := m.validateNonce(ctx, nonce, userID, timestamp); err != nil {
-		span.RecordError(err)
-		span.SetAttributes(attribute.Bool("auth.valid", false))
-		return err
-	}
-
-	// Recompute HMAC signature
-	message := m.buildHMACMessage(c, userID, hostID, rolesStr, companiesStr, timestampStr, nonce)
-	mac := hmac.New(sha3.New256, []byte(m.sharedSecret))
-	mac.Write([]byte(message))
-	expected := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-
-	// Constant-time comparison to prevent timing attacks
-	if !hmac.Equal([]byte(signature), []byte(expected)) {
-		err := fmt.Errorf("invalid signature")
-		span.RecordError(err)
-		span.SetAttributes(attribute.Bool("auth.valid", false))
-		return err
-	}
-
-	// Parse roles
-	roles := []string{}
-	if rolesStr != "" {
-		roles = strings.Split(rolesStr, ",")
-	}
-
-	// Parse companies
-	companies := []models.CompanyRoles{}
-	if companiesStr != "" {
-		if err := json.Unmarshal([]byte(companiesStr), &companies); err != nil {
-			span.RecordError(err)
-			span.SetAttributes(attribute.Bool("auth.valid", false))
-			return fmt.Errorf("invalid companies format in headers")
+	// Convert CompanyRoles to CompanyPermissionsForAuthUserMap
+	var companiesRoles *models.CompanyPermissionsForAuthUserMap
+	if len(claims.CompanyRoles) > 0 {
+		permMap := make(models.CompanyPermissionsForAuthUserMap)
+		for companyID, cr := range claims.CompanyRoles {
+			permMap[companyID] = cr.Roles
 		}
+		companiesRoles = &permMap
 	}
 
-	// Store user context
+	// Build UserContext
 	userCtx := &models.UserContext{
-		UserID:         userID,
-		HostID:         hostID,
-		Email:          email,
-		EmailVerified:  emailVerified,
-		Roles:          roles,
-		CompaniesRoles: &companies,
+		UserID:         claims.UserID,
+		Email:          claims.Email,
+		EmailVerified:  true, // Gateway only issues tokens for verified emails
+		CompaniesRoles: companiesRoles,
+		Subject:        claims.KeycloakID,
 	}
 
+	// Store in context
 	c.Set(models.UserContextKey, userCtx)
+	c.Request = c.Request.WithContext(ctx)
+
 	span.SetAttributes(attribute.Bool("auth.valid", true))
 	return nil
 }
 
-// buildHMACMessage constructs the message for HMAC computation
-func (m *InternalServiceAuth) buildHMACMessage(c *gin.Context, userID, hostID, roles, companies, timestamp, nonce string) string {
-	// Base message (always included)
-	parts := []string{userID, hostID, roles, companies, timestamp, nonce}
-
-	// Optionally include HTTP method (recommended for security)
-	if m.includeMethod {
-		parts = append([]string{c.Request.Method}, parts...)
-	}
-
-	// Optionally include request path (recommended for security)
-	if m.includePath {
-		path := c.Request.URL.Path
-		if m.includeMethod {
-			// Method already prepended, add path after it
-			parts = append([]string{parts[0], path}, parts[1:]...)
-		} else {
-			// No method, prepend path
-			parts = append([]string{path}, parts...)
+// parseToken parses and validates the internal JWT
+func (m *InternalJWTAuth) parseToken(tokenString string) (*InternalJWTClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &InternalJWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+		// Verify signing method is HMAC
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
+		return m.jwtSecret, nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse token: %w", err)
 	}
 
-	return strings.Join(parts, ":")
+	if !token.Valid {
+		return nil, fmt.Errorf("token is invalid")
+	}
+
+	claims, ok := token.Claims.(*InternalJWTClaims)
+	if !ok {
+		return nil, fmt.Errorf("invalid claims type")
+	}
+
+	return claims, nil
 }
 
 // isPublicPath checks if the current request path is public
-func (m *InternalServiceAuth) isPublicPath(c *gin.Context) bool {
+func (m *InternalJWTAuth) isPublicPath(c *gin.Context) bool {
 	if len(m.publicPaths) == 0 {
 		return false
 	}
@@ -308,242 +202,12 @@ func (m *InternalServiceAuth) isPublicPath(c *gin.Context) bool {
 	return false
 }
 
-// ============================================================
-// NONCE VALIDATION (Replay Attack Prevention)
-// ============================================================
-
-// validateNonce checks if nonce has been used before
-func (m *InternalServiceAuth) validateNonce(ctx context.Context, nonce, userID string, timestamp int64) error {
-	ctx, span := m.tracer.Start(ctx, "internal_auth.validate_nonce")
-	defer span.End()
-
-	span.SetAttributes(attribute.String("auth.user_id", userID))
-
-	// Validate nonce format (must be hex string, 32 characters minimum)
-	if len(nonce) < 32 {
-		err := fmt.Errorf("nonce too short (minimum 32 characters)")
-		span.RecordError(err)
-		span.SetAttributes(attribute.Bool("nonce.valid", false))
-		return err
-	}
-
-	// Verify nonce is valid hex
-	if _, err := hex.DecodeString(nonce); err != nil {
-		span.RecordError(err)
-		span.SetAttributes(attribute.Bool("nonce.valid", false))
-		return fmt.Errorf("nonce must be hex string")
-	}
-
-	// Nonce key scoped by userID to prevent cross-user replay
-	nonceKey := m.getNonceKey(userID, nonce)
-
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-
-	// Try to set nonce if not exists (atomic operation)
-	// SetNX returns true if key was set, false if already exists
-	wasSet, err := m.cache.SetNX(ctx, nonceKey, []byte("1"), m.nonceTTL)
-	if err != nil {
-		span.RecordError(err)
-		span.SetAttributes(attribute.Bool("nonce.valid", false))
-		return fmt.Errorf("redis error checking nonce: %w", err)
-	}
-
-	if !wasSet {
-		// Nonce already exists - replay attack detected!
-		err := fmt.Errorf("nonce already used - replay attack detected")
-		span.RecordError(err)
-		span.SetAttributes(attribute.Bool("nonce.valid", false))
-		return err
-	}
-
-	// Nonce is valid and has been recorded
-	span.SetAttributes(attribute.Bool("nonce.valid", true))
-	return nil
+// GetUserContext is a helper to retrieve user context from gin.Context
+func GetUserContext(c *gin.Context) (*models.UserContext, bool) {
+	return models.GetUserContext(c)
 }
 
-// getNonceKey returns Redis key for nonce tracking (scoped by userID)
-func (m *InternalServiceAuth) getNonceKey(userID, nonce string) string {
-	return fmt.Sprintf("nonce:%s:%s", userID, nonce)
-}
-
-// ForwardedUserHeaders represents user context forwarded from API gateway
-type ForwardedUserHeaders struct {
-	UserID        string
-	HostID        string
-	Email         string
-	EmailVerified bool
-	Roles         []string
-	Companies     []models.CompanyRoles
-}
-
-// ExtractForwardedUserContext extracts user context from headers set by Traefik
-// Traefik middleware should forward these after JWT validation
-func ExtractForwardedUserContext(c *gin.Context) (*ForwardedUserHeaders, error) {
-	userID := c.GetHeader("X-User-ID")
-	if userID == "" {
-		return nil, fmt.Errorf("missing user ID header")
-	}
-	hostID := c.GetHeader("X-Host-ID")
-	if hostID == "" {
-		return nil, fmt.Errorf("missing host ID header")
-	}
-
-	email := c.GetHeader("X-User-Email")
-	emailVerified := c.GetHeader("X-User-Email-Verified") == "true"
-
-	// Parse roles from comma-separated string
-	rolesStr := c.GetHeader("X-User-Roles")
-	var roles []string
-	if rolesStr != "" {
-		roles = parseCommaSeparated(rolesStr)
-	}
-
-	// Parse companies from JSON header
-	companiesStr := c.GetHeader("X-User-Companies")
-	var companies []models.CompanyRoles
-	if companiesStr != "" {
-		// In production, parse JSON. For simplicity, we'll leave it empty
-		// json.Unmarshal([]byte(companiesStr), &companies)
-	}
-
-	return &ForwardedUserHeaders{
-		UserID:        userID,
-		HostID:        hostID,
-		Email:         email,
-		EmailVerified: emailVerified,
-		Roles:         roles,
-		Companies:     companies,
-	}, nil
-}
-
-// parseCommaSeparated splits a comma-separated string into a slice
-func parseCommaSeparated(s string) []string {
-	if s == "" {
-		return []string{}
-	}
-
-	result := []string{}
-	for _, part := range splitAndTrim(s, ",") {
-		if part != "" {
-			result = append(result, part)
-		}
-	}
-	return result
-}
-
-// splitAndTrim splits and trims strings
-func splitAndTrim(s, sep string) []string {
-	parts := []string{}
-	for _, part := range split(s, sep) {
-		trimmed := trim(part)
-		if trimmed != "" {
-			parts = append(parts, trimmed)
-		}
-	}
-	return parts
-}
-
-func split(s, sep string) []string {
-	// Simple split implementation
-	var parts []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if i+len(sep) <= len(s) && s[i:i+len(sep)] == sep {
-			parts = append(parts, s[start:i])
-			start = i + len(sep)
-			i += len(sep) - 1
-		}
-	}
-	parts = append(parts, s[start:])
-	return parts
-}
-
-func trim(s string) string {
-	start := 0
-	end := len(s)
-
-	// Trim leading spaces
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-
-	// Trim trailing spaces
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-
-	return s[start:end]
-}
-
-// CombinedAuth combines JWT validation with internal service authentication
-// Use this for services that need both external (via API gateway) and internal access
-func CombinedAuth(jwtMiddleware *JWTMiddleware, internalAuth *InternalServiceAuth) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// Check if request has internal auth headers
-		internalAuthHeader := c.GetHeader("X-Internal-Auth")
-
-		if internalAuthHeader != "" {
-			// Internal service call - validate internal auth
-			internalAuth.Middleware()(c)
-			if c.IsAborted() {
-				return
-			}
-
-			// Extract forwarded user context
-			userContext, err := ExtractForwardedUserContext(c)
-			if err != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid forwarded user context"})
-				c.Abort()
-				return
-			}
-
-			// Set user context in Gin context
-			c.Set("user_id", userContext.UserID)
-			c.Set("host_id", userContext.HostID)
-			c.Set("email", userContext.Email)
-			c.Set("email_verified", userContext.EmailVerified)
-			c.Set("roles", userContext.Roles)
-			c.Set("companies", userContext.Companies)
-		} else {
-			// External call via API gateway - validate JWT
-			jwtMiddleware.Middleware()(c)
-			if c.IsAborted() {
-				return
-			}
-		}
-
-		c.Next()
-	}
-}
-
-// GenerateNonce generates a cryptographically secure random nonce
-func GenerateNonce() (string, error) {
-	nonce := make([]byte, 32)
-	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf("failed to generate nonce: %w", err)
-	}
-	return hex.EncodeToString(nonce), nil
-}
-
-// ComputeHMAC computes HMAC signature (for testing)
-func ComputeHMAC(secret, method, path, userID, hostID, roles, companies string, timestamp int64, nonce string, includeMethod, includePath bool) string {
-	parts := []string{userID, hostID, roles, companies, fmt.Sprintf("%d", timestamp), nonce}
-
-	if includeMethod {
-		parts = append([]string{method}, parts...)
-	}
-
-	if includePath {
-		if includeMethod {
-			parts = append([]string{parts[0], path}, parts[1:]...)
-		} else {
-			parts = append([]string{path}, parts...)
-		}
-	}
-
-	message := strings.Join(parts, ":")
-	mac := hmac.New(sha3.New256, []byte(secret))
-	mac.Write([]byte(message))
-	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+// MustGetUserContext retrieves user context or panics (use after RequireAuth)
+func MustGetUserContext(c *gin.Context) *models.UserContext {
+	return models.MustGetUserContext(c)
 }

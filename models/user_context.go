@@ -1,6 +1,8 @@
 package models
 
 import (
+	"slices"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -11,14 +13,16 @@ import (
 // UserContextKey is the key used to store UserContext in gin.Context
 const UserContextKey = "user_context"
 
+type CompanyPermissionsForAuthUserMap map[string][]string
+
 // UserContext represents the authenticated user context
 type UserContext struct {
 	UserID         string
 	HostID         string
 	Email          string
 	EmailVerified  bool
-	Roles          []string
-	CompaniesRoles *[]CompanyRoles `json:"companies_roles,omitempty"`
+	Roles          []string                          // REGISTERED_GUEST, REGISTERED_HOST, SYSTEM_ADMIN
+	CompaniesRoles *CompanyPermissionsForAuthUserMap `json:"companies_roles,omitempty"`
 	SessionID      string
 	Subject        string // Keycloak user ID
 }
@@ -42,62 +46,50 @@ func (u *UserContext) HasAnyOfRoles(roles ...string) bool {
 }
 
 // GetUserCompanyRoles returns user's roles for a specific company
-func (u *UserContext) GetUserCompanyRoles(companyID string) (map[string]string, bool) {
-	roles := make(map[string]string)
+func (u *UserContext) GetUserCompanyRoles(companyID string) ([]string, bool) {
 	if u.CompaniesRoles != nil {
-		for _, company := range *u.CompaniesRoles {
-			if company.CompanyID == companyID {
-				for key, val := range company.Roles {
-					if val == CompanyStatusVerified {
-						roles[key] = val
-					}
-				}
-			}
+		if roles, exists := (*u.CompaniesRoles)[companyID]; exists {
+			return roles, true
 		}
 	}
-	return roles, len(roles) > 0
+	return nil, false
 }
 
 // HasCompanyAccess checks if user has access to a company with any role
 func (u *UserContext) HasCompanyAccess(companyID string) bool {
 	if u.CompaniesRoles != nil {
-		for _, company := range *u.CompaniesRoles {
-			if company.CompanyID == companyID {
-				return true
-			}
+		if _, exists := (*u.CompaniesRoles)[companyID]; exists {
+			return true
 		}
 	}
 	return false
 }
 
-func (u *UserContext) HasCompanyRoleWithSpecificStatus(companyID, role, status string) bool {
+func (u *UserContext) HasAnyOfCompanyRoles(companyID string, roles ...string) bool {
+	var companyHasAnyOfRoles bool = false
 	if u.CompaniesRoles != nil {
-		for _, c := range *u.CompaniesRoles {
-			if c.CompanyID == companyID {
-				val, ok := c.Roles[role]
-				if ok && val == status {
+		if _, exists := (*u.CompaniesRoles)[companyID]; exists {
+			for _, role := range roles {
+				companyHasAnyOfRoles = slices.Contains((*u.CompaniesRoles)[companyID], role)
+				if companyHasAnyOfRoles {
 					return true
 				}
 			}
 		}
 	}
-	return false
+	return companyHasAnyOfRoles
 }
 
-func (u *UserContext) HasAnyOfVerifiedCompanyRoles(companyID string, roles ...string) bool {
+// GetUserCompanies returns all verified companies for the user
+func (u *UserContext) GetUserCompanies() []string {
+	companies := make([]string, 0)
+	// copy companyroles
 	if u.CompaniesRoles != nil {
-		for _, c := range *u.CompaniesRoles {
-			if c.CompanyID == companyID {
-				for _, role := range roles {
-					val, ok := c.Roles[role]
-					if ok && val == CompanyStatusVerified {
-						return true
-					}
-				}
-			}
+		for companyID := range *u.CompaniesRoles {
+			companies = append(companies, companyID)
 		}
 	}
-	return false
+	return companies
 }
 
 // GetUserContext retrieves user context from gin.Context
@@ -118,32 +110,4 @@ func MustGetUserContext(c *gin.Context) *UserContext {
 		panic("user context not found - did you forget RequireAuth()?")
 	}
 	return userCtx
-}
-
-// GetUserCompanies returns all verified companies for the user
-func (u *UserContext) GetUserCompanies() []CompanyRoles {
-	companies := make([]CompanyRoles, 0)
-	// copy companyroles
-	if u.CompaniesRoles != nil {
-		companies = append(companies, *u.CompaniesRoles...)
-	}
-	return companies
-}
-
-func (u *UserContext) GetCompanyRoles(companyID string) (map[string]string, bool) {
-	if u.CompaniesRoles == nil {
-		return nil, false
-	}
-
-	for _, company := range *u.CompaniesRoles {
-		if company.CompanyID == companyID {
-			roles := make(map[string]string, len(company.Roles))
-			for k, v := range company.Roles {
-				roles[k] = v
-			}
-			return roles, true
-		}
-	}
-
-	return nil, false
 }

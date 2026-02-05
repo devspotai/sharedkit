@@ -170,7 +170,7 @@ func RequireCompanyRole(requiredRole string) gin.HandlerFunc {
 			return
 		}
 
-		if !userCtx.HasAnyOfVerifiedCompanyRoles(companyID, requiredRole) {
+		if !userCtx.HasAnyOfCompanyRoles(companyID, requiredRole) {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error":         "insufficient permissions for this company",
 				"company_id":    companyID,
