@@ -4,10 +4,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
-
+	"github.com/devspotai/sharedkit/auth"
 	"github.com/devspotai/sharedkit/models"
+	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -15,42 +14,39 @@ import (
 
 // InternalJWTAuth middleware validates internal JWTs from the API gateway
 type InternalJWTAuth struct {
-	jwtSecret   []byte
+	jwtHelper   *auth.InternalJWT
+	jtiTracker  *auth.JTITracker
 	publicPaths map[string]bool
 	tracer      trace.Tracer
 }
 
-// InternalJWTClaims represents the claims in the internal JWT from the gateway
-type InternalJWTClaims struct {
-	UserID              string                    `json:"user_id"`
-	Email               string                    `json:"email"`
-	KeycloakID          string                    `json:"keycloak_id"`
-	CompanyRoles        map[string]CompanyRole    `json:"company_roles"`
-	HasAnyCompanyAccess bool                      `json:"has_company_access"`
-	ManagedCompanyIDs   []string                  `json:"managed_companies,omitempty"`
-	jwt.RegisteredClaims
-}
-
-// CompanyRole represents a user's roles in a company
-type CompanyRole struct {
-	Roles                  []string `json:"roles"`
-	HasGranularPermissions bool     `json:"has_granular_perms"`
+// InternalJWTAuthConfig holds configuration for internal JWT auth middleware
+type InternalJWTAuthConfig struct {
+	JWTSecret   string
+	PublicPaths []string
+	// JTITracker enables replay attack prevention (optional)
+	JTITracker *auth.JTITracker
 }
 
 // NewInternalJWTAuth creates a new internal JWT authentication middleware
 func NewInternalJWTAuth(jwtSecret string, publicPaths []string) *InternalJWTAuth {
-	if jwtSecret == "" {
-		panic("internal JWT secret cannot be empty")
-	}
+	return NewInternalJWTAuthWithConfig(InternalJWTAuthConfig{
+		JWTSecret:   jwtSecret,
+		PublicPaths: publicPaths,
+	})
+}
 
+// NewInternalJWTAuthWithConfig creates middleware with full configuration
+func NewInternalJWTAuthWithConfig(cfg InternalJWTAuthConfig) *InternalJWTAuth {
 	// Convert public paths slice to map for O(1) lookup
 	publicPathsMap := make(map[string]bool)
-	for _, path := range publicPaths {
+	for _, path := range cfg.PublicPaths {
 		publicPathsMap[path] = true
 	}
 
 	return &InternalJWTAuth{
-		jwtSecret:   []byte(jwtSecret),
+		jwtHelper:   auth.NewInternalJWT(auth.DefaultInternalJWTConfig(cfg.JWTSecret)),
+		jtiTracker:  cfg.JTITracker,
 		publicPaths: publicPathsMap,
 		tracer:      otel.Tracer("internal-jwt-auth"),
 	}
@@ -115,11 +111,37 @@ func (m *InternalJWTAuth) validateRequest(c *gin.Context) error {
 	}
 
 	// Parse and validate JWT
-	claims, err := m.parseToken(tokenString)
+	claims, err := m.jwtHelper.ParseToken(tokenString)
 	if err != nil {
 		span.RecordError(err)
 		span.SetAttributes(attribute.Bool("auth.valid", false))
 		return fmt.Errorf("invalid token: %w", err)
+	}
+
+	// Check JTI for replay attacks (if tracker is configured)
+	if m.jtiTracker != nil && claims.ID != "" {
+		expiry := claims.ExpiresAt.Time
+		if err := m.jtiTracker.CheckAndMark(ctx, claims.ID, expiry); err != nil {
+			span.RecordError(err)
+			span.SetAttributes(
+				attribute.Bool("auth.valid", false),
+				attribute.Bool("auth.replay_detected", true),
+			)
+			return fmt.Errorf("token replay detected: %w", err)
+		}
+
+		// Also check user-level revocation
+		if claims.IssuedAt != nil {
+			revoked, err := m.jtiTracker.IsUserTokenRevoked(ctx, claims.UserID, claims.IssuedAt.Time)
+			if err == nil && revoked {
+				span.RecordError(auth.ErrTokenReplay)
+				span.SetAttributes(
+					attribute.Bool("auth.valid", false),
+					attribute.Bool("auth.user_revoked", true),
+				)
+				return fmt.Errorf("user tokens revoked")
+			}
+		}
 	}
 
 	span.SetAttributes(
@@ -153,32 +175,6 @@ func (m *InternalJWTAuth) validateRequest(c *gin.Context) error {
 
 	span.SetAttributes(attribute.Bool("auth.valid", true))
 	return nil
-}
-
-// parseToken parses and validates the internal JWT
-func (m *InternalJWTAuth) parseToken(tokenString string) (*InternalJWTClaims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &InternalJWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-		// Verify signing method is HMAC
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return m.jwtSecret, nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse token: %w", err)
-	}
-
-	if !token.Valid {
-		return nil, fmt.Errorf("token is invalid")
-	}
-
-	claims, ok := token.Claims.(*InternalJWTClaims)
-	if !ok {
-		return nil, fmt.Errorf("invalid claims type")
-	}
-
-	return claims, nil
 }
 
 // isPublicPath checks if the current request path is public
