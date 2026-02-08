@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -359,6 +360,65 @@ func (e *CompanyOPAEngine) AuthorizeCompanyAccess(domainCfg CompanyAuthzConfig) 
 		c.Set("company_id", companyID)
 
 		c.Next()
+	}
+}
+
+// ============================================================
+// ENDPOINT ROLE GUARD
+// ============================================================
+
+// RequireCompanyRoles returns Gin middleware that restricts an endpoint to
+// users whose company roles (set by OPA tier 1) overlap with the allowed list.
+//
+// Use this AFTER AuthorizeCompanyAccess to add per-endpoint granularity:
+//
+//	company.GET("/host-details", middleware.RequireCompanyRoles("OWNER"), handler)
+//	company.GET("/host-summary", middleware.RequireCompanyRoles("OWNER", "STAFF"), handler)
+func RequireCompanyRoles(allowed ...string) gin.HandlerFunc {
+	tracer := otel.Tracer("company-role-guard")
+
+	return func(c *gin.Context) {
+		_, span := tracer.Start(c.Request.Context(), "authz.require_company_roles")
+		defer span.End()
+
+		span.SetAttributes(attribute.StringSlice("authz.allowed_roles", allowed))
+
+		rolesVal, exists := c.Get(OPACompanyRolesKey)
+		if !exists {
+			span.SetAttributes(attribute.Bool("authz.granted", false))
+			c.JSON(http.StatusForbidden, models.GetErrorResponse(
+				"company authorization required", http.StatusForbidden, "",
+			))
+			c.Abort()
+			return
+		}
+
+		companyRoles, ok := rolesVal.([]string)
+		if !ok {
+			span.SetAttributes(attribute.Bool("authz.granted", false))
+			c.JSON(http.StatusForbidden, models.GetErrorResponse(
+				"no company roles", http.StatusForbidden, "",
+			))
+			c.Abort()
+			return
+		}
+
+		for _, role := range companyRoles {
+			if slices.Contains(allowed, role) {
+				span.SetAttributes(
+					attribute.Bool("authz.granted", true),
+					attribute.String("authz.matched_role", role),
+				)
+				c.Next()
+				return
+			}
+		}
+
+		span.SetAttributes(attribute.Bool("authz.granted", false))
+		c.JSON(http.StatusForbidden, models.GetErrorResponse(
+			"insufficient role for this endpoint", http.StatusForbidden, "",
+		))
+		c.Abort()
 	}
 }
 

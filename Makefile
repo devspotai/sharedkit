@@ -10,10 +10,10 @@ all: test
 
 ## Run with coverage + race detector
 test:
-	$(GO) test -race -cover -coverprofile=coverage.out ./...
+	go test -race -cover -coverprofile=coverage.out ./...
 
 test-html:
-	$(GO) tool cover -html=coverage.out -o coverage.html
+	go tool cover -html=coverage.out -o coverage.html
 
 
 tidy:
