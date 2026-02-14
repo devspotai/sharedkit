@@ -59,6 +59,10 @@ type RedisConfig struct {
 	PoolSize          int
 	MinIdleConns      int
 	DefaultTTLSeconds int
+	TLSEnabled        bool
+	TLSCACert         string
+	TLSCert           string
+	TLSKey            string
 }
 
 // DefaultRedisConfig returns sensible defaults for Redis configuration
@@ -81,6 +85,10 @@ func LoadRedisConfig() *RedisConfig {
 		MaxRetries:   GetEnvAsInt("REDIS_MAX_RETRIES", 3),
 		PoolSize:     GetEnvAsInt("REDIS_POOL_SIZE", 10),
 		MinIdleConns: GetEnvAsInt("REDIS_MIN_IDLE_CONNS", 2),
+		TLSEnabled:   GetEnvAsBool("REDIS_TLS_ENABLED", false),
+		TLSCACert:    GetEnv("REDIS_TLS_CA_CERT", ""),
+		TLSCert:      GetEnv("REDIS_TLS_CLIENT_CERT", ""),
+		TLSKey:       GetEnv("REDIS_TLS_CLIENT_KEY", ""),
 	}
 }
 

@@ -2,8 +2,11 @@ package cache
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/devspotai/sharedkit/config"
@@ -59,7 +62,7 @@ func NewRedisCache(addr, username, password string, db int) (*RedisCache, error)
 }
 
 func NewRedisCacheFromConfig(cfg *config.RedisConfig) *RedisCache {
-	client := redis.NewClient(&redis.Options{
+	opts := &redis.Options{
 		Addr:         cfg.URL,
 		Username:     cfg.Username,
 		Password:     cfg.Password,
@@ -67,10 +70,34 @@ func NewRedisCacheFromConfig(cfg *config.RedisConfig) *RedisCache {
 		MaxRetries:   cfg.MaxRetries,
 		PoolSize:     cfg.PoolSize,
 		MinIdleConns: cfg.MinIdleConns,
-	})
+	}
+
+	if cfg.TLSEnabled {
+		tlsCfg := &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+
+		if cfg.TLSCACert != "" {
+			caCert, err := os.ReadFile(cfg.TLSCACert)
+			if err == nil {
+				pool := x509.NewCertPool()
+				pool.AppendCertsFromPEM(caCert)
+				tlsCfg.RootCAs = pool
+			}
+		}
+
+		if cfg.TLSCert != "" && cfg.TLSKey != "" {
+			cert, err := tls.LoadX509KeyPair(cfg.TLSCert, cfg.TLSKey)
+			if err == nil {
+				tlsCfg.Certificates = []tls.Certificate{cert}
+			}
+		}
+
+		opts.TLSConfig = tlsCfg
+	}
 
 	return &RedisCache{
-		client: client,
+		client: redis.NewClient(opts),
 		ttl:    time.Duration(cfg.DefaultTTLSeconds) * time.Second,
 		tracer: otel.Tracer("redis-cache"),
 	}
