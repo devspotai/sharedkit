@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/devspotai/sharedkit/config"
@@ -87,9 +88,36 @@ func NewRedisCacheFromConfig(cfg *config.RedisConfig) *RedisCache {
 		}
 
 		if cfg.TLSCert != "" && cfg.TLSKey != "" {
-			cert, err := tls.LoadX509KeyPair(cfg.TLSCert, cfg.TLSKey)
-			if err == nil {
-				tlsCfg.Certificates = []tls.Certificate{cert}
+			// Hot-reload client cert from disk on each new connection (1-minute cache).
+			// step ca renew --daemon replaces the files atomically; GetClientCertificate
+			// picks up the renewed cert without restarting the Redis client.
+			var mu sync.RWMutex
+			var cached *tls.Certificate
+			var loadedAt time.Time
+
+			tlsCfg.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+				mu.RLock()
+				if cached != nil && time.Since(loadedAt) < 5*time.Minute {
+					c := cached
+					mu.RUnlock()
+					return c, nil
+				}
+				mu.RUnlock()
+				mu.Lock()
+				defer mu.Unlock()
+				if cached != nil && time.Since(loadedAt) < 5*time.Minute {
+					return cached, nil
+				}
+				c, err := tls.LoadX509KeyPair(cfg.TLSCert, cfg.TLSKey)
+				if err != nil {
+					if cached != nil {
+						return cached, nil // serve stale cert rather than drop connections
+					}
+					return nil, err
+				}
+				cached = &c
+				loadedAt = time.Now()
+				return cached, nil
 			}
 		}
 
