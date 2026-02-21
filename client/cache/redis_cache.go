@@ -62,7 +62,9 @@ func NewRedisCache(addr, username, password string, db int) (*RedisCache, error)
 	}, nil
 }
 
-func NewRedisCacheFromConfig(cfg *config.RedisConfig) *RedisCache {
+// buildRedisOptions constructs *redis.Options from a RedisConfig, including
+// mTLS with a 5-minute GetClientCertificate hot-reload cache when configured.
+func buildRedisOptions(cfg *config.RedisConfig) *redis.Options {
 	opts := &redis.Options{
 		Addr:         cfg.URL,
 		Username:     cfg.Username,
@@ -88,7 +90,7 @@ func NewRedisCacheFromConfig(cfg *config.RedisConfig) *RedisCache {
 		}
 
 		if cfg.TLSCert != "" && cfg.TLSKey != "" {
-			// Hot-reload client cert from disk on each new connection (1-minute cache).
+			// Hot-reload client cert from disk on each new connection (5-minute cache).
 			// step ca renew --daemon replaces the files atomically; GetClientCertificate
 			// picks up the renewed cert without restarting the Redis client.
 			var mu sync.RWMutex
@@ -124,8 +126,19 @@ func NewRedisCacheFromConfig(cfg *config.RedisConfig) *RedisCache {
 		opts.TLSConfig = tlsCfg
 	}
 
+	return opts
+}
+
+// NewRedisClientFromConfig returns a raw *redis.Client configured from RedisConfig,
+// including mTLS hot-reload. Use this when you need the raw client for rate limiters,
+// JTI trackers, or other utilities that don't use the RedisCache wrapper.
+func NewRedisClientFromConfig(cfg *config.RedisConfig) *redis.Client {
+	return redis.NewClient(buildRedisOptions(cfg))
+}
+
+func NewRedisCacheFromConfig(cfg *config.RedisConfig) *RedisCache {
 	return &RedisCache{
-		client: redis.NewClient(opts),
+		client: redis.NewClient(buildRedisOptions(cfg)),
 		ttl:    time.Duration(cfg.DefaultTTLSeconds) * time.Second,
 		tracer: otel.Tracer("redis-cache"),
 	}
