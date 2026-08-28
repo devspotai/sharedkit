@@ -213,16 +213,6 @@ func (z *ZitadelAuth) companyRoles(ctx context.Context, userID string, claims *z
 		if err := z.cache.Get(ctx, auth.RolesCacheKey(userID), &entry); err == nil {
 			return entry.CompanyRoles, nil
 		}
-		// Fall back to the pre-unification key so a rollout does not start cold.
-		// Remove once no writer emits it.
-		var legacy models.CompanyPermissionsForAuthUserMap
-		if err := z.cache.Get(ctx, auth.LegacyRolesCacheKey(userID), &legacy); err == nil {
-			out := make(map[string]auth.CompanyRole, len(legacy))
-			for companyID, roles := range legacy {
-				out[companyID] = auth.NewCompanyRole(roles)
-			}
-			return out, nil
-		}
 	}
 
 	roles, err := z.users.CompanyRoles(ctx, userID)
