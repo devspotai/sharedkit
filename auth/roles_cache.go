@@ -18,11 +18,6 @@ func RolesCacheKey(userID string) string {
 	return fmt.Sprintf("user:%s:company-roles", userID)
 }
 
-// LegacyRolesCacheKey is the pre-unification key. Read-only; do not write it.
-func LegacyRolesCacheKey(userID string) string {
-	return fmt.Sprintf("user:%s:company_roles", userID)
-}
-
 // RolesCacheEntry is the cached value. Only CompanyRoles is load-bearing; the
 // rest is there to make a cache dump legible and is not read back for auth.
 type RolesCacheEntry struct {
