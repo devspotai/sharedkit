@@ -178,6 +178,41 @@ func TestPublicPathsSkipAuthentication(t *testing.T) {
 	}
 }
 
+func TestParameterisedPublicPathsAreActuallyPublic(t *testing.T) {
+	// Public paths are configured as route patterns. Matching only the request
+	// path silently authenticates every parameterised public route, because
+	// "/api/v1/destinations/PT/facts" is not in the list and never will be.
+	z, err := NewZitadelAuth(ZitadelAuthConfig{
+		Validator:   stubValidator{err: errors.New("must not be called for a public path")},
+		Users:       &stubUsers{},
+		PublicPaths: []string{"/api/v1/destinations/:destination/facts", "/api/v1/countries"},
+	})
+	if err != nil {
+		t.Fatalf("NewZitadelAuth: %v", err)
+	}
+
+	r := gin.New()
+	r.Use(z.Middleware())
+	r.GET("/api/v1/destinations/:destination/facts", func(c *gin.Context) { c.Status(http.StatusOK) })
+	r.GET("/api/v1/countries", func(c *gin.Context) { c.Status(http.StatusOK) })
+	r.GET("/api/v1/users/me", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{"/api/v1/destinations/PT/facts", http.StatusOK}, // the one that regressed
+		{"/api/v1/countries", http.StatusOK},             // unparameterised, always worked
+		{"/api/v1/users/me", http.StatusUnauthorized},    // not public, must still be guarded
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if w.Code != tc.want {
+			t.Errorf("GET %s = %d, want %d", tc.path, w.Code, tc.want)
+		}
+	}
+}
+
 func TestMalformedAuthorizationHeaderIsRejected(t *testing.T) {
 	for name, header := range map[string]string{
 		"absent":     "",

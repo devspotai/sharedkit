@@ -116,7 +116,7 @@ func NewZitadelAuth(cfg ZitadelAuthConfig) (*ZitadelAuth, error) {
 // Middleware authenticates every request except those on a public path.
 func (z *ZitadelAuth) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if z.publicPaths[c.Request.URL.Path] {
+		if z.isPublicPath(c) {
 			c.Next()
 			return
 		}
@@ -127,6 +127,24 @@ func (z *ZitadelAuth) Middleware() gin.HandlerFunc {
 // MiddlewareRequired authenticates every request, public paths included.
 func (z *ZitadelAuth) MiddlewareRequired() gin.HandlerFunc {
 	return func(c *gin.Context) { z.authenticate(c) }
+}
+
+// isPublicPath matches the route pattern first, then the literal path.
+//
+// The pattern is what a caller configures — "/api/v1/destinations/:destination/facts"
+// — and it is what gin exposes as FullPath once a route matches. Comparing only
+// the request path means every parameterised public route fails the check and is
+// treated as authenticated, because "/api/v1/destinations/PT/facts" is not in the
+// list and never will be. The literal comparison is kept for routes registered
+// without a pattern.
+func (z *ZitadelAuth) isPublicPath(c *gin.Context) bool {
+	if len(z.publicPaths) == 0 {
+		return false
+	}
+	if pattern := c.FullPath(); pattern != "" && z.publicPaths[pattern] {
+		return true
+	}
+	return z.publicPaths[c.Request.URL.Path]
 }
 
 func (z *ZitadelAuth) authenticate(c *gin.Context) {
