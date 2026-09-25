@@ -8,19 +8,19 @@ Private shared library (`github.com/devspotai/sharedkit`) consumed by all devspo
 
 ```
 Module: github.com/devspotai/sharedkit
-Go version: 1.25.3
+Go version: 1.27.0 (toolchain go1.27.1)
 ```
 
 ## Key Dependencies
 
 | Package | Version |
 |---------|---------|
-| github.com/gin-gonic/gin | v1.11.0 |
-| github.com/golang-jwt/jwt/v5 | v5.3.0 |
-| github.com/open-policy-agent/opa | v1.13.1 |
-| github.com/redis/go-redis/v9 | v9.17.1 |
-| go.opentelemetry.io/otel | v1.39.0 |
-| github.com/prometheus/client_golang | v1.23.2 |
+| github.com/gin-gonic/gin | v1.12.0 |
+| github.com/golang-jwt/jwt/v5 | v5.3.1 |
+| github.com/open-policy-agent/opa | v1.21.0 |
+| github.com/redis/go-redis/v9 | v9.22.0 |
+| go.opentelemetry.io/otel | v1.46.0 |
+| github.com/prometheus/client_golang | v1.24.1 |
 
 **OPA import path**: `github.com/open-policy-agent/opa/v1/rego` — Rego files must use `import rego.v1`.
 
