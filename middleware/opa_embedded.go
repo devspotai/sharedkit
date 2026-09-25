@@ -278,7 +278,8 @@ func (e *CompanyOPAEngine) Evaluate(
 // level authorization for a specific domain.
 //
 // It extracts the company ID from path params ("companyId" / "company_id")
-// or query param ("companyId"), evaluates the embedded policy, and sets
+// or query param ("companyId"); a request naming two different companies is
+// rejected with 400. It then evaluates the embedded policy, and sets
 // context keys for downstream domain-level middleware:
 //
 //   - OPACompanyAllowedKey      (bool)     – company access granted
@@ -310,10 +311,10 @@ func (e *CompanyOPAEngine) AuthorizeCompanyAccess(domainCfg CompanyAuthzConfig) 
 		span.SetAttributes(attribute.String("user.id", userCtx.UserID))
 
 		// 2. Resolve company ID from request
-		companyID := extractCompanyID(c)
-		if companyID == "" {
+		companyID, err := resolveCompanyID(c)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, models.GetErrorResponse(
-				"company_id required", http.StatusBadRequest, "",
+				err.Error(), http.StatusBadRequest, "",
 			))
 			c.Abort()
 			return
@@ -518,10 +519,10 @@ func (s *CompanyOPASidecar) AuthorizeCompanyAccess(domainCfg CompanyAuthzConfig)
 		span.SetAttributes(attribute.String("user.id", userCtx.UserID))
 
 		// 2. Resolve company ID from request
-		companyID := extractCompanyID(c)
-		if companyID == "" {
+		companyID, err := resolveCompanyID(c)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, models.GetErrorResponse(
-				"company_id required", http.StatusBadRequest, "",
+				err.Error(), http.StatusBadRequest, "",
 			))
 			c.Abort()
 			return
@@ -637,18 +638,4 @@ func (s *CompanyOPASidecar) queryCompanyOPA(ctx context.Context, input map[strin
 	)
 
 	return &opaResponse.Result, nil
-}
-
-// ============================================================
-// HELPERS
-// ============================================================
-
-func extractCompanyID(c *gin.Context) string {
-	if id := c.Param("companyId"); id != "" {
-		return id
-	}
-	if id := c.Param("company_id"); id != "" {
-		return id
-	}
-	return c.Query("companyId")
 }
