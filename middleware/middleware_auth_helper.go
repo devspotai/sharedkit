@@ -110,18 +110,10 @@ func RequireCompanyAccess() gin.HandlerFunc {
 			return
 		}
 
-		// Get company ID from URL parameter or query
-		companyID := c.Param("companyId")
-		if companyID == "" {
-			companyID = c.Query("companyId")
-		}
-		if companyID == "" {
-			companyID = c.Param("company_id")
-		}
-
-		if companyID == "" {
+		companyID, err := resolveCompanyID(c)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "company_id required",
+				"error": err.Error(),
 			})
 			c.Abort()
 			return
@@ -154,17 +146,10 @@ func RequireCompanyRole(requiredRole string) gin.HandlerFunc {
 			return
 		}
 
-		companyID := c.Param("companyId")
-		if companyID == "" {
-			companyID = c.Query("companyId")
-		}
-		if companyID == "" {
-			companyID = c.Param("company_id")
-		}
-
-		if companyID == "" {
+		companyID, err := resolveCompanyID(c)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "company_id required",
+				"error": err.Error(),
 			})
 			c.Abort()
 			return

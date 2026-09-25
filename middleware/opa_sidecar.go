@@ -159,7 +159,7 @@ func (e *DomainOPAEngine) AuthorizeDomainResource() gin.HandlerFunc {
 				"method":     c.Request.Method,
 				"path":       c.Request.URL.Path,
 				"action":     mapMethodToAction(c.Request.Method),
-				"company_id": c.Param("companyId"),
+				"company_id": sidecarCompanyID(c),
 				"stay_id":    c.Param("stayId"),
 				"user_id":    c.Param("userId"),
 			},
@@ -356,7 +356,7 @@ func buildSidecarInput(c *gin.Context, userCtx *models.UserContext) map[string]a
 			"method":     c.Request.Method,
 			"path":       c.Request.URL.Path,
 			"action":     mapMethodToAction(c.Request.Method),
-			"company_id": c.Param("companyId"),
+			"company_id": sidecarCompanyID(c),
 			"stay_id":    c.Param("stayId"),
 			"user_id":    c.Param("userId"),
 			"query":      c.Request.URL.Query(),
@@ -429,4 +429,14 @@ func mapMethodToAction(method string) string {
 	default:
 		return "read"
 	}
+}
+
+// sidecarCompanyID returns the company tier 1 authorised, so tier 2 always
+// evaluates the same company. Falls back to the path parameter when tier 1
+// has not run.
+func sidecarCompanyID(c *gin.Context) string {
+	if id := c.GetString("company_id"); id != "" {
+		return id
+	}
+	return c.Param("companyId")
 }
