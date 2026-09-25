@@ -1,36 +1,9 @@
 package models
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 )
-
-// JWKS represents JSON Web Key Set
-type JWKS struct {
-	Keys []JWK `json:"keys"`
-}
-
-type JWKSJSON struct {
-	Keys []json.RawMessage `json:"keys"`
-}
-
-// JWK represents a JSON Web Key
-type JWK struct {
-	Kid string `json:"kid"`
-	Kty string `json:"kty"`
-	Alg string `json:"alg"`
-	Use string `json:"use"`
-	N   string `json:"n"`
-	E   string `json:"e"`
-}
-
-// CompanyRole represents a company association in the JWT
-type CompanyRoles struct {
-	CompanyID     string            `json:"company_id"`
-	CoverImageURL string            `json:"cover_image_url,omitempty"`
-	Roles         map[string]string `json:"roles,omitempty"` // ADMIN_ALL_EXPERIENCES: VERIFIED, ADMIN_ALL_STAYS: PENDING
-}
 
 // ErrorResponse is a standard error response format
 type ErrorResponse struct {

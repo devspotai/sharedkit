@@ -20,14 +20,6 @@ type Config struct {
 	RedisPassword string
 	RedisDB       int
 
-	// Keycloak
-	KeycloakURL   string
-	KeycloakRealm string
-
-	// Internal Service Authentication
-	InternalSharedSecret string
-	UseInternalAuth      bool
-
 	// Observability
 	GrafanaCloudInstanceID   string
 	GrafanaCloudAPIKey       string
@@ -101,10 +93,6 @@ func LoadConfig() (*Config, error) {
 		RedisURL:                 GetEnv("REDIS_URL", "localhost:6379"),
 		RedisPassword:            GetEnv("REDIS_PASSWORD", ""),
 		RedisDB:                  GetEnvAsInt("REDIS_DB", 0),
-		KeycloakURL:              GetEnv("KEYCLOAK_URL", "http://localhost:8080"),
-		KeycloakRealm:            GetEnv("KEYCLOAK_REALM", "travel-saas"),
-		InternalSharedSecret:     GetEnv("INTERNAL_SHARED_SECRET", ""),
-		UseInternalAuth:          GetEnvAsBool("USE_INTERNAL_AUTH", false),
 		GrafanaCloudInstanceID:   GetEnv("GRAFANA_CLOUD_INSTANCE_ID", ""),
 		GrafanaCloudAPIKey:       GetEnv("GRAFANA_CLOUD_API_KEY", ""),
 		GrafanaCloudOTLPEndpoint: GetEnv("GRAFANA_CLOUD_OTLP_ENDPOINT", ""),
@@ -117,10 +105,6 @@ func LoadConfig() (*Config, error) {
 	// Validate required configuration
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
-	}
-
-	if cfg.UseInternalAuth && cfg.InternalSharedSecret == "" {
-		return nil, fmt.Errorf("INTERNAL_SHARED_SECRET is required when USE_INTERNAL_AUTH is true")
 	}
 
 	return cfg, nil

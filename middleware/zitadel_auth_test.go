@@ -10,8 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/devspotai/sharedkit/auth"
-	"github.com/devspotai/sharedkit/auth/zitadel"
+	"github.com/devspotai/sharedkit/authn/zitadel"
+	"github.com/devspotai/sharedkit/authz"
 	"github.com/devspotai/sharedkit/models"
 )
 
@@ -31,7 +31,7 @@ type stubUsers struct {
 	resolveErr error
 	resolved   int
 
-	roles    map[string]auth.CompanyRole
+	roles    map[string]authz.CompanyRole
 	rolesErr error
 }
 
@@ -40,7 +40,7 @@ func (s *stubUsers) ResolveUserID(context.Context, string) (string, bool, error)
 	return s.resolveID, true, s.resolveErr
 }
 
-func (s *stubUsers) CompanyRoles(context.Context, string) (map[string]auth.CompanyRole, error) {
+func (s *stubUsers) CompanyRoles(context.Context, string) (map[string]authz.CompanyRole, error) {
 	return s.roles, s.rolesErr
 }
 
@@ -98,8 +98,8 @@ func TestNewZitadelAuthRequiresValidatorAndUsers(t *testing.T) {
 }
 
 func TestAuthenticatedRequestGetsUserContext(t *testing.T) {
-	users := &stubUsers{roles: map[string]auth.CompanyRole{
-		"company-1": auth.NewCompanyRole([]string{"OWNER"}),
+	users := &stubUsers{roles: map[string]authz.CompanyRole{
+		"company-1": authz.NewCompanyRole([]string{"OWNER"}),
 	}}
 
 	w, uc := run(t, ZitadelAuthConfig{
@@ -119,12 +119,11 @@ func TestAuthenticatedRequestGetsUserContext(t *testing.T) {
 	if uc.Subject != "378124744102248456" {
 		t.Errorf("Subject = %q", uc.Subject)
 	}
-	// The internal-JWT path hardcodes EmailVerified to true; this one carries
-	// the real claim.
+	// EmailVerified comes from the token's claim, not a hardcoded true.
 	if !uc.EmailVerified {
 		t.Error("EmailVerified = false, want true")
 	}
-	// InternalJWTAuth leaves Roles empty, which quietly disables RequireRole.
+	// Project roles must reach Roles, or RequireRole quietly denies everyone.
 	if len(uc.Roles) != 1 || uc.Roles[0] != "REGISTERED_HOST" {
 		t.Errorf("Roles = %v, want [REGISTERED_HOST]", uc.Roles)
 	}
@@ -138,8 +137,7 @@ func TestAuthenticatedRequestGetsUserContext(t *testing.T) {
 
 func TestFirstLoginProvisionsAndSignalsRefresh(t *testing.T) {
 	// The claims carry no app_uid yet. The user must be provisioned and the
-	// client told to fetch a fresh token — the old header never survived
-	// Traefik, so the browser could not act on it.
+	// client told, via a header it can act on, to fetch a fresh token.
 	claims := validClaims()
 	claims.UserID = ""
 	users := &stubUsers{resolveID: testUser}
@@ -286,7 +284,7 @@ func TestInvalidTokenIsUnauthorized(t *testing.T) {
 func TestUserWithNoCompaniesGetsNilCompaniesRoles(t *testing.T) {
 	w, uc := run(t, ZitadelAuthConfig{
 		Validator: stubValidator{claims: validClaims()},
-		Users:     &stubUsers{roles: map[string]auth.CompanyRole{}},
+		Users:     &stubUsers{roles: map[string]authz.CompanyRole{}},
 	}, "/api/stays", bearer)
 
 	if w.Code != http.StatusOK {

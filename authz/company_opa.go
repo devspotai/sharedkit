@@ -1,4 +1,4 @@
-package middleware
+package authz
 
 import (
 	"bytes"
@@ -373,8 +373,8 @@ func (e *CompanyOPAEngine) AuthorizeCompanyAccess(domainCfg CompanyAuthzConfig) 
 //
 // Use this AFTER AuthorizeCompanyAccess to add per-endpoint granularity:
 //
-//	company.GET("/host-details", middleware.RequireCompanyRoles("OWNER"), handler)
-//	company.GET("/host-summary", middleware.RequireCompanyRoles("OWNER", "STAFF"), handler)
+//	company.GET("/host-details", authz.RequireCompanyRoles("OWNER"), handler)
+//	company.GET("/host-summary", authz.RequireCompanyRoles("OWNER", "STAFF"), handler)
 func RequireCompanyRoles(allowed ...string) gin.HandlerFunc {
 	tracer := otel.Tracer("company-role-guard")
 
