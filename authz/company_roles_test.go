@@ -1,10 +1,9 @@
-package middleware
+package authz
 
 import (
 	"encoding/json"
 	"testing"
 
-	"github.com/devspotai/sharedkit/auth"
 	"github.com/devspotai/sharedkit/models"
 )
 
@@ -14,7 +13,7 @@ import (
 const warmerOutput = `{
   "user_id": "3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b",
   "email": "traveller@example.com",
-  "keycloak_id": "378124744102248456",
+  "idp_user_id": "378124744102248456",
   "company_roles": {
     "company-1": {"roles": ["OWNER"], "has_granular_perms": false},
     "company-2": {"roles": ["ADMIN_SPECIFIC_STAYS"], "has_granular_perms": true}
@@ -22,26 +21,18 @@ const warmerOutput = `{
   "cached_at": 1756377600
 }`
 
-func TestDefaultKeyMatchesWhatWritersUse(t *testing.T) {
-	// The middleware read "user:<id>:company_roles" while every writer used
+func TestRolesCacheKeyMatchesWhatWritersUse(t *testing.T) {
+	// The reader once used "user:<id>:company_roles" while every writer used
 	// "user:<id>:company-roles", so it never found anything.
-	cfg := RolesCacheConfig{}
-	if cfg.CacheKeyFunc == nil {
-		cfg.CacheKeyFunc = auth.RolesCacheKey
-	}
-	got := cfg.CacheKeyFunc("abc")
-	if want := auth.RolesCacheKey("abc"); got != want {
-		t.Fatalf("default key = %q, want %q", got, want)
-	}
-	if got != "user:abc:company-roles" {
-		t.Errorf("default key = %q, want the hyphenated form writers emit", got)
+	if got := RolesCacheKey("abc"); got != "user:abc:company-roles" {
+		t.Errorf("RolesCacheKey = %q, want the hyphenated form writers emit", got)
 	}
 }
 
 func TestStoredEntryDecodes(t *testing.T) {
 	// The middleware decoded into map[string][]string, so "user_id": "..." was
 	// asked to become a []string and the whole entry failed.
-	var entry auth.RolesCacheEntry
+	var entry RolesCacheEntry
 	if err := json.Unmarshal([]byte(warmerOutput), &entry); err != nil {
 		t.Fatalf("the warmer's own output must decode: %v", err)
 	}
@@ -66,7 +57,7 @@ func TestDecodingIntoTheOldShapeFails(t *testing.T) {
 }
 
 func TestEntryConvertsToUserContextShape(t *testing.T) {
-	var entry auth.RolesCacheEntry
+	var entry RolesCacheEntry
 	if err := json.Unmarshal([]byte(warmerOutput), &entry); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}

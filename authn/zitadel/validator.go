@@ -1,17 +1,16 @@
-// Package zitadel validates Zitadel-issued OIDC access tokens offline against
-// the instance's JWKS.
+// Package zitadel authenticates Zitadel-issued OIDC access tokens: Validator
+// checks them offline against the instance's JWKS, and Authenticator turns a
+// valid token into an authn principal.
 //
-// It is the counterpart to client/auth, which does the same for Keycloak. Three
-// things Keycloak put where a generic OIDC validator expects them, Zitadel does
-// not:
+// Three things a generic OIDC validator expects in standard places, Zitadel
+// puts elsewhere:
 //
-//	sub       Keycloak issued a UUID; Zitadel issues a numeric snowflake
-//	          (e.g. 378124744102248456). A UUID-shaped check rejects every token.
-//	user_id   Keycloak carried custom attributes as top-level claims. Zitadel
-//	          carries them under urn:zitadel:iam:user:metadata, as a map whose
-//	          values are base64-encoded.
-//	roles     realm_access.roles becomes urn:zitadel:iam:org:project:roles, a map
-//	          of role key -> {orgID: orgDomain}.
+//	sub       a numeric snowflake (e.g. 378124744102248456), not a UUID, so a
+//	          UUID-shaped check rejects every token.
+//	user_id   custom attributes live under urn:zitadel:iam:user:metadata, as a
+//	          map whose values are base64-encoded, not as top-level claims.
+//	roles     urn:zitadel:iam:org:project:roles, a map of role key ->
+//	          {orgID: orgDomain}.
 //
 // # Audience is mandatory
 //

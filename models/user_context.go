@@ -24,7 +24,7 @@ type UserContext struct {
 	Roles          []string                          // REGISTERED_GUEST, REGISTERED_HOST, SYSTEM_ADMIN
 	CompaniesRoles *CompanyPermissionsForAuthUserMap `json:"companies_roles,omitempty"`
 	SessionID      string
-	Subject        string // Keycloak user ID
+	Subject        string // identity provider subject (e.g. Zitadel user ID)
 }
 
 func (u *UserContext) HasRole(role string) bool {

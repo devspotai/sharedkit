@@ -6,7 +6,6 @@ toolchain go1.27.1
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/lestrrat-go/jwx/v3 v3.3.0
 	github.com/open-policy-agent/opa v1.21.0
 	github.com/prometheus/client_golang v1.24.1
