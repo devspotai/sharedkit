@@ -135,14 +135,18 @@ func generateJTI() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-// ParseToken parses and validates an internal JWT
+// ParseToken parses and validates an internal JWT. The token must be HS256,
+// carry an exp, and match the configured issuer and at least one of the
+// configured audiences.
 func (j *InternalJWT) ParseToken(tokenString string) (*InternalJWTClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &InternalJWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
 		return j.secret, nil
-	})
+	},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuer(j.issuer),
+		jwt.WithAudience(j.audience...),
+	)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse token: %w", err)
