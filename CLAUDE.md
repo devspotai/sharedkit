@@ -6,6 +6,15 @@ Shared Go library (`github.com/devspotai/sharedkit`). Its main job is **authoriz
 
 Live consumer: `serveyourstay-platform/sys-backend-services` (Zitadel, DigitalOcean App Platform, no gateway). Check its usage before changing any public API.
 
+## Visibility: this repository is public
+
+`github.com/devspotai/sharedkit` is a **public** GitHub repository. Everything pushed is world-readable: code, commit messages, branches, tags, PR descriptions and issues.
+
+- Never commit secrets, tokens, real hostnames of internal services, or customer data, even in tests or examples.
+- Describe security fixes in PRs by what changed, not by how the old behaviour could be exploited, at least until consumers have deployed the fix.
+- Consumers fetch it through `proxy.golang.org`; no `GOPRIVATE` or access token is needed.
+- The Go proxy caches each tagged version permanently. Never move or delete a pushed tag; release a new version instead.
+
 ## Module
 
 ```
