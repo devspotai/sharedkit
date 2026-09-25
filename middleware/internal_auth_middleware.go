@@ -24,6 +24,10 @@ type InternalJWTAuth struct {
 type InternalJWTAuthConfig struct {
 	JWTSecret   string
 	PublicPaths []string
+	// Issuer and Audience must match what the token issuer signs with.
+	// Empty values use auth.DefaultInternalJWTConfig's defaults.
+	Issuer   string
+	Audience []string
 	// JTITracker enables replay attack prevention (optional)
 	JTITracker *auth.JTITracker
 }
@@ -44,8 +48,16 @@ func NewInternalJWTAuthWithConfig(cfg InternalJWTAuthConfig) *InternalJWTAuth {
 		publicPathsMap[path] = true
 	}
 
+	jwtCfg := auth.DefaultInternalJWTConfig(cfg.JWTSecret)
+	if cfg.Issuer != "" {
+		jwtCfg.Issuer = cfg.Issuer
+	}
+	if len(cfg.Audience) > 0 {
+		jwtCfg.Audience = cfg.Audience
+	}
+
 	return &InternalJWTAuth{
-		jwtHelper:   auth.NewInternalJWT(auth.DefaultInternalJWTConfig(cfg.JWTSecret)),
+		jwtHelper:   auth.NewInternalJWT(jwtCfg),
 		jtiTracker:  cfg.JTITracker,
 		publicPaths: publicPathsMap,
 		tracer:      otel.Tracer("internal-jwt-auth"),
@@ -118,8 +130,16 @@ func (m *InternalJWTAuth) validateRequest(c *gin.Context) error {
 		return fmt.Errorf("invalid token: %w", err)
 	}
 
-	// Check JTI for replay attacks (if tracker is configured)
-	if m.jtiTracker != nil && claims.ID != "" {
+	// Check JTI for replay attacks (if tracker is configured). ParseToken
+	// guarantees ExpiresAt is set. A token without a jti cannot be tracked,
+	// so it is rejected rather than let through unchecked.
+	if m.jtiTracker != nil {
+		if claims.ID == "" {
+			err := fmt.Errorf("token has no jti")
+			span.RecordError(err)
+			span.SetAttributes(attribute.Bool("auth.valid", false))
+			return err
+		}
 		expiry := claims.ExpiresAt.Time
 		if err := m.jtiTracker.CheckAndMark(ctx, claims.ID, expiry); err != nil {
 			span.RecordError(err)
@@ -130,17 +150,28 @@ func (m *InternalJWTAuth) validateRequest(c *gin.Context) error {
 			return fmt.Errorf("token replay detected: %w", err)
 		}
 
-		// Also check user-level revocation
-		if claims.IssuedAt != nil {
-			revoked, err := m.jtiTracker.IsUserTokenRevoked(ctx, claims.UserID, claims.IssuedAt.Time)
-			if err == nil && revoked {
-				span.RecordError(auth.ErrTokenReplay)
-				span.SetAttributes(
-					attribute.Bool("auth.valid", false),
-					attribute.Bool("auth.user_revoked", true),
-				)
-				return fmt.Errorf("user tokens revoked")
-			}
+		// Also check user-level revocation, which needs iat to compare against.
+		if claims.IssuedAt == nil {
+			err := fmt.Errorf("token has no iat")
+			span.RecordError(err)
+			span.SetAttributes(attribute.Bool("auth.valid", false))
+			return err
+		}
+		revoked, err := m.jtiTracker.IsUserTokenRevoked(ctx, claims.UserID, claims.IssuedAt.Time)
+		if err != nil {
+			// Fail closed, as CheckAndMark does: a revoked token must not
+			// pass just because the revocation store is unreachable.
+			span.RecordError(err)
+			span.SetAttributes(attribute.Bool("auth.valid", false))
+			return fmt.Errorf("checking token revocation: %w", err)
+		}
+		if revoked {
+			span.RecordError(auth.ErrTokenReplay)
+			span.SetAttributes(
+				attribute.Bool("auth.valid", false),
+				attribute.Bool("auth.user_revoked", true),
+			)
+			return fmt.Errorf("user tokens revoked")
 		}
 	}
 
