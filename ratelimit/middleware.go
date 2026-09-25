@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/devspotai/sharedkit/models"
 	"github.com/gin-gonic/gin"
 )
 
@@ -27,25 +28,24 @@ type MiddlewareConfig struct {
 	UseFixedWindow bool
 }
 
-// DefaultKeyFunc returns the client IP as the rate limit key
+// DefaultKeyFunc returns the client IP as the rate limit key.
+//
+// It relies on gin's ClientIP, which only honours X-Forwarded-For / X-Real-IP
+// from trusted proxies. Gin trusts every proxy by default, so services behind
+// a proxy must call engine.SetTrustedProxies with the proxy's addresses;
+// otherwise a client can pick its own key by sending those headers.
 func DefaultKeyFunc(c *gin.Context) string {
-	// Check X-Forwarded-For first (for requests behind proxy)
-	if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
-		return "ip:" + xff
-	}
-	// Check X-Real-IP
-	if xri := c.GetHeader("X-Real-IP"); xri != "" {
-		return "ip:" + xri
-	}
-	// Fall back to remote address
 	return "ip:" + c.ClientIP()
 }
 
-// UserKeyFunc returns the user ID from context as the rate limit key
-// Falls back to IP if user is not authenticated
+// UserKeyFunc returns the authenticated user's ID as the rate limit key.
+// Falls back to the client IP if the user is not authenticated.
 func UserKeyFunc(c *gin.Context) string {
-	if userID, exists := c.Get("user_id"); exists {
-		return "user:" + fmt.Sprintf("%v", userID)
+	if uc, ok := models.GetUserContext(c); ok && uc != nil && uc.UserID != "" {
+		return "user:" + uc.UserID
+	}
+	if userID := c.GetString("user_id"); userID != "" {
+		return "user:" + userID
 	}
 	return DefaultKeyFunc(c)
 }
