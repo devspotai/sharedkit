@@ -19,7 +19,7 @@ Live consumer: `serveyourstay-platform/sys-backend-services` (Zitadel, DigitalOc
 
 ```
 Module: github.com/devspotai/sharedkit
-Go version: 1.27.0 (toolchain go1.27.1)
+Go version: 1.27.0 (toolchain go1.27.2)
 ```
 
 ## Key Dependencies
