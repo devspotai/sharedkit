@@ -13,10 +13,19 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-// CompanyRole is a user's roles within one company.
+// CompanyRole is a user's roles within one company, and — for the granular
+// ADMIN_SPECIFIC_* roles — the specific resources those roles cover.
+//
+// StayIDs and ExperienceIDs are what a tier-2 policy checks a request against.
+// They belong in the same value as the roles so one cache read answers both
+// "may this user act in this company" and "on which resources": the decision
+// needs no database query. Entries written before these fields existed decode
+// with them empty, which grants nothing at resource level — fail closed.
 type CompanyRole struct {
 	Roles                  []string `json:"roles"`
 	HasGranularPermissions bool     `json:"has_granular_perms"`
+	StayIDs                []string `json:"stay_ids,omitempty"`
+	ExperienceIDs          []string `json:"experience_ids,omitempty"`
 }
 
 // NewCompanyRole builds a CompanyRole, deriving HasGranularPermissions.
@@ -154,11 +163,22 @@ func ApplyCompanyRoles(c *gin.Context, source CompanyRoleSource) bool {
 
 	// Nil, not an empty map, when the user belongs to no company, so
 	// "roles were never loaded" and "no companies" look the same to guards.
+	// Resources are reset too: they must never outlive the roles they came with.
 	uc.CompaniesRoles = nil
+	uc.CompaniesResources = nil
 	if len(roles) > 0 {
 		perms := make(models.CompanyPermissionsForAuthUserMap, len(roles))
 		for companyID, cr := range roles {
 			perms[companyID] = cr.Roles
+			if len(cr.StayIDs) > 0 || len(cr.ExperienceIDs) > 0 {
+				if uc.CompaniesResources == nil {
+					uc.CompaniesResources = make(map[string]models.CompanyResources)
+				}
+				uc.CompaniesResources[companyID] = models.CompanyResources{
+					StayIDs:       cr.StayIDs,
+					ExperienceIDs: cr.ExperienceIDs,
+				}
+			}
 		}
 		uc.CompaniesRoles = &perms
 	}

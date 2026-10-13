@@ -15,6 +15,17 @@ const UserContextKey = "user_context"
 
 type CompanyPermissionsForAuthUserMap map[string][]string
 
+// CompanyResources are the specific resources a user may act on within one
+// company, for the ADMIN_SPECIFIC_* roles. They travel with the company roles
+// (the same cache entry), so a resource-level decision needs no extra lookup.
+//
+// Empty means none, never all: a granular role with no listed resources grants
+// nothing at resource level.
+type CompanyResources struct {
+	StayIDs       []string `json:"stay_ids,omitempty"`
+	ExperienceIDs []string `json:"experience_ids,omitempty"`
+}
+
 // UserContext represents the authenticated user context
 type UserContext struct {
 	UserID         string
@@ -23,8 +34,17 @@ type UserContext struct {
 	EmailVerified  bool
 	Roles          []string                          // REGISTERED_GUEST, REGISTERED_HOST, SYSTEM_ADMIN
 	CompaniesRoles *CompanyPermissionsForAuthUserMap `json:"companies_roles,omitempty"`
-	SessionID      string
-	Subject        string // identity provider subject (e.g. Zitadel user ID)
+	// CompaniesResources holds CompanyResources per company ID, only for
+	// companies where the user has any. Filled alongside CompaniesRoles.
+	CompaniesResources map[string]CompanyResources `json:"companies_resources,omitempty"`
+	SessionID          string
+	Subject            string // identity provider subject (e.g. Zitadel user ID)
+}
+
+// GetCompanyResources returns the user's specific resources in a company. The
+// zero value (no resources) is returned when there are none.
+func (u *UserContext) GetCompanyResources(companyID string) CompanyResources {
+	return u.CompaniesResources[companyID]
 }
 
 func (u *UserContext) HasRole(role string) bool {

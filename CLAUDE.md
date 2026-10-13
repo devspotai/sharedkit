@@ -48,7 +48,7 @@ authz/                      # authorization — IdP-agnostic
   company_roles.go          # CompanyRole, CompanyRoleSource, CachedRoles, LoadCompanyRoles, RolesCacheKey/Entry
   guards.go                 # RequireAuth, RequireRole, RequireAnyRole, RequireEmailVerified, RequireCompanyAccess, RequireCompanyRole
   company_opa.go            # tier 1: CompanyOPAEngine, CompanyOPASidecar, RequireCompanyRoles, Stays/ExperiencesDomainConfig
-  domain_opa.go             # tier 2: DomainOPAEngine, DomainOPASidecar
+  domain_opa.go             # tier 2: DomainOPAEngine (+AuthorizeResource), DomainOPASidecar, RestrictedResources
   company_id.go             # resolveCompanyID — the single company-ID rule
 middleware/
   cors.go                   # CORS(), CORSWithConfig()
@@ -213,15 +213,37 @@ group.Use(authz.RequireCompanyRoles("OWNER", "MANAGER"))
 
 // HTTP method → OPA action: GET → "read", POST → "create", PUT/PATCH → "update", DELETE → "delete"
 
-domainEngine, err := authz.NewDomainOPAEngine(authz.DomainOPAConfig{...})
+domainEngine, err := authz.NewDomainOPAEngine(authz.DomainOPAConfig{
+    Policy: staysPolicy, PackageName: "stays_authz",
+    ResourceIDParam: "id", // -> input.request.resource_id
+})
 group.Use(domainEngine.AuthorizeDomainResource())  // tier 2; skipped unless tier 1 requires it
+
+// Tier-2 input always carries the user's specific resources in the company
+// tier 1 authorised (arrays, never null), so the policy decides from the cache:
+//   allow if { input.request.resource_id in input.company_resources.stay_ids }
+
+// Nested routes (/packages/:id) whose handler resolves the governed resource:
+ok, err := domainEngine.AuthorizeResource(c, pkg.StayID) // true at once if tier 1 did not flag
+
+// Lists and creates:
+if res, restricted := authz.RestrictedResources(c); restricted {
+    // filter the list to res.StayIDs; refuse creating a new stay
+}
 ```
+
+**Resource-scoped decisions use only the authorised company's resources.** A grant
+in company B never counts toward a request under company A; the tests in
+`authz/domain_opa_test.go` pin that with a cross-company case.
+Empty resources mean none, never all.
 
 `CompanyOPASidecar` / `DomainOPASidecar` implement the same interfaces against an external OPA over HTTP.
 
 ## Company roles cache (`authz/company_roles.go`)
 
 Key `user:<userID>:company-roles` (**hyphen**), value `authz.RolesCacheEntry` (`user_id`, `email`, `idp_user_id`, `company_roles`, `cached_at`). The platform's permission warmer writes the same format; only `company_roles` is read back. If you change either side, change both.
+
+Each `company_roles` value is a `CompanyRole`: `roles`, `has_granular_perms`, and — for `ADMIN_SPECIFIC_*` — `stay_ids` / `experience_ids` (omitted when empty). The writer fills the ids from the same grant rows as the roles, so one cache read answers both the company and the resource question. `ApplyCompanyRoles` copies them to `UserContext.CompaniesResources`. An entry without them (older writer) decodes as no resources: fail closed.
 
 ## CORS (`middleware/cors.go`)
 
